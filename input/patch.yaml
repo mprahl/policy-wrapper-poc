@@ -1,0 +1,9 @@
+---
+metadata:
+  annotations:
+    policy.open-cluster-management.io/categories: PR.DS Data Security
+  labels:
+    app: super-secure-app
+spec:
+  remediationAction: enforce
+  disabled: false
