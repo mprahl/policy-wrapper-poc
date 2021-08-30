@@ -193,8 +193,21 @@ func prepareKustomizationEnv(
 		unstructured.SetNestedField(patchYaml, policyName, "metadata", "name")
 		unstructured.SetNestedField(patchYaml, policyNamespace, "metadata", "namespace")
 		// Populate some fields that are required by Kustomize and always the same
-		unstructured.SetNestedField(patchYaml, policyAPIVersion, "apiVersion")
-		unstructured.SetNestedField(patchYaml, policyKind, "kind")
+		apiVersion, found, err := unstructured.NestedString(patchYaml, "apiVersion")
+		if err != nil || (found && apiVersion != policyAPIVersion) {
+			return fmt.Errorf(
+				"patches must have apiVersion not be set or set to %s", policyAPIVersion,
+			)
+		} else if !found {
+			unstructured.SetNestedField(patchYaml, policyAPIVersion, "apiVersion")
+		}
+
+		kind, found, err := unstructured.NestedString(patchYaml, "kind")
+		if err != nil || (found && kind != policyKind) {
+			return fmt.Errorf("patches must have kind not be set or set to %s", policyKind)
+		} else if !found {
+			unstructured.SetNestedField(patchYaml, policyKind, "kind")
+		}
 
 		fileBytes, err = yaml.Marshal(patchYaml)
 		if err != nil {
