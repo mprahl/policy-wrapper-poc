@@ -2,8 +2,11 @@
 package main
 
 import (
+	"bytes"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path"
@@ -44,6 +47,35 @@ func getPolicyConfigBase(name, namespace string) map[string]interface{} {
 	}
 }
 
+// unmarshalObjDefFile unmarshals the input object manifest/definition file into
+// a slice in order to account for multiple YAML documents in the same file.
+// If the file cannot be decoded or each document is not a map, an error will
+// be returned.
+func unmarshalObjDefFile(objDefFile []byte) (*[]interface{}, error) {
+	yamlDocs := []interface{}{}
+	d := yaml.NewDecoder(bytes.NewReader(objDefFile))
+	for {
+		var obj interface{}
+		err := d.Decode(&obj)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return nil, err
+		}
+
+		if _, ok := obj.(map[string]interface{}); !ok {
+			err := errors.New("the input object manifests must be in the format of YAML objects")
+			return nil, err
+		}
+
+		yamlDocs = append(yamlDocs, obj)
+	}
+
+	return &yamlDocs, nil
+}
+
 func createPatchFromK8sObjects(
 	name,
 	namespace,
@@ -51,17 +83,20 @@ func createPatchFromK8sObjects(
 	severity string,
 	annotations map[string]string,
 	disabled bool,
-	objDefs [][]byte,
+	objDefFiles [][]byte,
 ) ([]byte, error) {
 	objDefYamls := []interface{}{}
-	for _, objDef := range objDefs {
-		var obj interface{}
-		err := yaml.Unmarshal(objDef, &obj)
+	for _, objDefFile := range objDefFiles {
+		objDefs, err := unmarshalObjDefFile(objDefFile)
 		if err != nil {
 			return nil, err
 		}
 
-		objDefYamls = append(objDefYamls, obj)
+		if len(*objDefs) == 0 {
+			return nil, errors.New("object manifest files cannot be empty")
+		}
+
+		objDefYamls = append(objDefYamls, *objDefs...)
 	}
 
 	policyTemplate := map[string]map[string]interface{}{
