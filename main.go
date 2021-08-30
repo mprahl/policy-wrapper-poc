@@ -81,12 +81,12 @@ func createPatchFromK8sObjects(
 	namespace,
 	remAction,
 	severity string,
-	annotations map[string]string,
+	annotations *map[string]string,
 	disabled bool,
-	objDefFiles [][]byte,
+	objDefFiles *[][]byte,
 ) ([]byte, error) {
 	objDefYamls := []interface{}{}
-	for _, objDefFile := range objDefFiles {
+	for _, objDefFile := range *objDefFiles {
 		objDefs, err := unmarshalObjDefFile(objDefFile)
 		if err != nil {
 			return nil, err
@@ -119,7 +119,7 @@ func createPatchFromK8sObjects(
 		"metadata": map[string]interface{}{
 			"name":        name,
 			"namespace":   namespace,
-			"annotations": annotations,
+			"annotations": *annotations,
 		},
 		"spec": map[string]interface{}{
 			"remediationAction": remAction,
@@ -325,9 +325,9 @@ func main() {
 		policyNamespace,
 		policyRemAction,
 		policySeverity,
-		policyAnnotations,
+		&policyAnnotations,
 		policyDisabled,
-		objDefsBytes,
+		&objDefsBytes,
 	)
 	if err != nil {
 		errorAndExit("Failed to create a policy: %v", err)
