@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,12 @@ const kustomizeDir = "kustomization"
 const policyAPIVersion = "policy.open-cluster-management.io/v1"
 const policyKind = "Policy"
 const configPolicyKind = "ConfigurationPolicy"
+const placementRuleAPIVersion = "apps.open-cluster-management.io/v1"
+const placementRuleKind = "PlacementRule"
+const placementBindingAPIVersion = "policy.open-cluster-management.io/v1"
+const placementBindingKind = "PlacementBinding"
+
+var clusterSelectorRegex = regexp.MustCompile(`^(.+)=(.+)$`)
 
 // Create a new type for a list of Strings
 type stringList []string
@@ -142,6 +149,7 @@ func errorAndExit(msg string, formatArgs ...interface{}) {
 func assertValidFlags(
 	policyNamespace,
 	policyName string,
+	clusterSelectors stringList,
 	patches stringList,
 	objDefs []string,
 ) {
@@ -151,6 +159,15 @@ func assertValidFlags(
 
 	if policyNamespace == "" {
 		errorAndExit("The -namespace flag must be set")
+	}
+
+	for _, clusterSelector := range clusterSelectors {
+		if matched := clusterSelectorRegex.MatchString(clusterSelector); !matched {
+			errorAndExit(
+				`The clusterSelector "%s" must be in the format of "label=value"`,
+				clusterSelector,
+			)
+		}
 	}
 
 	for _, patchPath := range patches {
@@ -249,6 +266,7 @@ func addCommentHeader(policyYAML *[]byte) *[]byte {
 #
 #    %s
 #
+---
 `,
 			args[0],
 			strings.Join(args, " "),
@@ -259,9 +277,93 @@ func addCommentHeader(policyYAML *[]byte) *[]byte {
 	return &outputYAML
 }
 
+func addPlacementObjects(
+	policyYaml *[]byte, policyNamespace, policyName string, clusterSelectors stringList,
+) *[]byte {
+
+	matchExpressions := []map[string]interface{}{}
+	for _, clusterSelector := range clusterSelectors {
+		// This was validated already in the assertValidFlags function
+		matches := clusterSelectorRegex.FindStringSubmatch(clusterSelector)
+		label := matches[1]
+		value := matches[2]
+		matchExpression := map[string]interface{}{
+			"key":      label,
+			"operator": "In",
+			"values":   []string{value},
+		}
+		matchExpressions = append(matchExpressions, matchExpression)
+	}
+
+	placementRuleName := "placement-" + policyName
+	rule := map[string]interface{}{
+		"apiVersion": placementRuleAPIVersion,
+		"kind":       placementRuleKind,
+		"metadata": map[string]interface{}{
+			"name":      placementRuleName,
+			"namespace": policyNamespace,
+		},
+		"spec": map[string]interface{}{
+			"clusterConditions": []map[string]string{
+				{"status": "True", "type": "ManagedClusterConditionAvailable"},
+			},
+			"clusterSelector": map[string]interface{}{
+				"matchExpressions": matchExpressions,
+			},
+		},
+	}
+
+	binding := map[string]interface{}{
+		"apiVersion": placementBindingAPIVersion,
+		"kind":       placementBindingKind,
+		"metadata": map[string]interface{}{
+			"name":      "binding-" + policyName,
+			"namespace": policyNamespace,
+		},
+		"placementRef": map[string]string{
+			"name":     placementRuleName,
+			"kind":     placementRuleKind,
+			"apiGroup": placementRuleAPIVersion,
+		},
+		"subjects": []map[string]string{
+			{
+				"name":     policyName,
+				"kind":     policyKind,
+				"apiGroup": policyAPIVersion,
+			},
+		},
+	}
+
+	ruleYAML, err := yaml.Marshal(rule)
+	// An error shouldn't be possible so panic if it is encountered
+	if err != nil {
+		panic(err)
+	}
+	ruleYAML = append([]byte("---\n"), ruleYAML...)
+
+	bindingYAML, err := yaml.Marshal(binding)
+	// An error shouldn't be possible so panic if it is encountered
+	if err != nil {
+		panic(err)
+	}
+	bindingYAML = append([]byte("---\n"), bindingYAML...)
+
+	combinedYAML := append(*policyYaml, bindingYAML...)
+	combinedYAML = append(combinedYAML, ruleYAML...)
+
+	return &combinedYAML
+}
+
 func main() {
 	nsFlag := flag.String("namespace", "replace-me", "the namespace for the policy")
 	nameFlag := flag.String("name", "replace-me", "the name for the policy")
+	var clusterSelectors stringList
+	flag.Var(
+		&clusterSelectors,
+		"cluster-selectors",
+		"a comma-separated list of placement rule cluster selectors; if not provided, the "+
+			"placement rule will be for all clusters",
+	)
 	outputFlag := flag.String("o", "", "the path to write the policy to; defaults to stdout")
 	var patches stringList
 	flag.Var(&patches, "patches", "a comma-separated list of Kustomize-like patches")
@@ -286,7 +388,7 @@ func main() {
 	severityFlag := flag.String("severity", "low", "the policy's severity (high, medium, or low)")
 	flag.Parse()
 
-	assertValidFlags(*nsFlag, *nameFlag, patches, flag.Args())
+	assertValidFlags(*nsFlag, *nameFlag, clusterSelectors, patches, flag.Args())
 
 	policyNamespace := *nsFlag
 	policyName := *nameFlag
@@ -376,6 +478,7 @@ func main() {
 	}
 
 	policyYAML = *addCommentHeader(&policyYAML)
+	policyYAML = *addPlacementObjects(&policyYAML, policyNamespace, policyName, clusterSelectors)
 
 	if outputPath != "" {
 		os.WriteFile(outputPath, policyYAML, 0444)
