@@ -12,7 +12,7 @@ The following command uses a Kustomize patch that is missing the identifiers of 
 apiVersion, and kind. Those are automatically filled in by the program.
 
 ```bash
-go run main.go -namespace my-policies --name policy-app-config --patches input/patch.yaml input/configmap.yaml
+go run main.go --namespace my-policies --name policy-app-config --patches input/patch.yaml input/configmap.yaml
 ```
 
 Output:
@@ -166,7 +166,7 @@ subjects:
 The following command relies on defaults but provides a couple overrides using flags:
 
 ```bash
-go run main.go -namespace my-policies -name policy-app-config -disabled=false -cluster-selectors cloud=redhat -remediationAction=enforce input/configmap.yaml
+go run main.go --namespace my-policies --name policy-app-config --disabled=false --cluster-selectors cloud=redhat --remediationAction=enforce input/configmap.yaml
 ```
 
 Output:
