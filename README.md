@@ -4,10 +4,6 @@
 
 This is a prototype to show the usage of [kustomize](https://kustomize.io/) for wrapping policies.
 
-## To Do
-
-* Add placement rule and placement binding support
-
 ## Examples
 
 ### With a Kustomize Patch

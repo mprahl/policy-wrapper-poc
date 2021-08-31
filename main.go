@@ -149,7 +149,8 @@ func errorAndExit(msg string, formatArgs ...interface{}) {
 
 func assertValidFlags(
 	policyNamespace,
-	policyName string,
+	policyName,
+	placementPath string,
 	clusterSelectors stringList,
 	patches stringList,
 	objDefs []string,
@@ -160,6 +161,12 @@ func assertValidFlags(
 
 	if policyNamespace == "" {
 		errorAndExit("The -namespace flag must be set")
+	}
+
+	if placementPath != "" {
+		if _, err := os.Stat(placementPath); err != nil {
+			errorAndExit("The placement %s could not be read", placementPath)
+		}
 	}
 
 	for _, clusterSelector := range clusterSelectors {
@@ -279,8 +286,12 @@ func addCommentHeader(policyYAML *[]byte) *[]byte {
 }
 
 func addPlacementObjects(
-	policyYaml *[]byte, policyNamespace, policyName string, clusterSelectors stringList,
-) *[]byte {
+	policyYaml *[]byte,
+	policyNamespace,
+	policyName,
+	placementPath string,
+	clusterSelectors stringList,
+) (*[]byte, error) {
 
 	matchExpressions := []map[string]interface{}{}
 	for _, clusterSelector := range clusterSelectors {
@@ -296,22 +307,65 @@ func addPlacementObjects(
 		matchExpressions = append(matchExpressions, matchExpression)
 	}
 
-	placementRuleName := "placement-" + policyName
-	rule := map[string]interface{}{
-		"apiVersion": placementRuleAPIVersion,
-		"kind":       placementRuleKind,
-		"metadata": map[string]interface{}{
-			"name":      placementRuleName,
-			"namespace": policyNamespace,
-		},
-		"spec": map[string]interface{}{
-			"clusterConditions": []map[string]string{
-				{"status": "True", "type": "ManagedClusterConditionAvailable"},
+	combinedYAML := *policyYaml
+	var placementRuleName string
+	if placementPath != "" {
+		placementBytes, err := ioutil.ReadFile(placementPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s", placementPath)
+		}
+
+		objects, err := unmarshalObjDefFile(placementBytes)
+		if err != nil {
+			return nil, fmt.Errorf("the placement path %s is invalid YAML: %v", placementPath, err)
+		}
+
+		for _, object := range *objects {
+			var object = object.(map[string]interface{})
+			if kind, _, _ := unstructured.NestedString(object, "kind"); kind != placementRuleKind {
+				continue
+			}
+
+			var found bool
+			placementRuleName, found, err = unstructured.NestedString(object, "metadata", "name")
+			if !found || err != nil {
+				return nil, fmt.Errorf("the placement path %s must have a name set", placementPath)
+			}
+
+			break
+		}
+
+		if placementRuleName == "" {
+			return nil, fmt.Errorf(
+				"the placement path %s did not have a placement rule", placementPath,
+			)
+		}
+	} else {
+		placementRuleName = "placement-" + policyName
+		rule := map[string]interface{}{
+			"apiVersion": placementRuleAPIVersion,
+			"kind":       placementRuleKind,
+			"metadata": map[string]interface{}{
+				"name":      placementRuleName,
+				"namespace": policyNamespace,
 			},
-			"clusterSelector": map[string]interface{}{
-				"matchExpressions": matchExpressions,
+			"spec": map[string]interface{}{
+				"clusterConditions": []map[string]string{
+					{"status": "True", "type": "ManagedClusterConditionAvailable"},
+				},
+				"clusterSelector": map[string]interface{}{
+					"matchExpressions": matchExpressions,
+				},
 			},
-		},
+		}
+
+		ruleYAML, err := yaml.Marshal(rule)
+		// An error shouldn't be possible so panic if it is encountered
+		if err != nil {
+			panic(err)
+		}
+		ruleYAML = append([]byte("---\n"), ruleYAML...)
+		combinedYAML = append(combinedYAML, ruleYAML...)
 	}
 
 	binding := map[string]interface{}{
@@ -335,24 +389,15 @@ func addPlacementObjects(
 		},
 	}
 
-	ruleYAML, err := yaml.Marshal(rule)
-	// An error shouldn't be possible so panic if it is encountered
-	if err != nil {
-		panic(err)
-	}
-	ruleYAML = append([]byte("---\n"), ruleYAML...)
-
 	bindingYAML, err := yaml.Marshal(binding)
 	// An error shouldn't be possible so panic if it is encountered
 	if err != nil {
 		panic(err)
 	}
 	bindingYAML = append([]byte("---\n"), bindingYAML...)
+	combinedYAML = append(combinedYAML, bindingYAML...)
 
-	combinedYAML := append(*policyYaml, bindingYAML...)
-	combinedYAML = append(combinedYAML, ruleYAML...)
-
-	return &combinedYAML
+	return &combinedYAML, nil
 }
 
 func main() {
@@ -363,9 +408,14 @@ func main() {
 		&clusterSelectors,
 		"cluster-selectors",
 		"a comma-separated list of placement rule cluster selectors; if not provided, the "+
-			"placement rule will be for all clusters",
+			"placement rule will be for all clusters; does not take effect if -placement is set",
 	)
 	outputFlag := flag.String("o", "", "the path to write the policy to; defaults to stdout")
+	placementFlag := flag.String(
+		"placement",
+		"",
+		"the path to the placement rule to use; takes precedence over -cluster-selectors",
+	)
 	var patches stringList
 	flag.Var(&patches, "patches", "a comma-separated list of Kustomize-like patches")
 	var categories stringList
@@ -389,7 +439,7 @@ func main() {
 	severityFlag := flag.String("severity", "low", "the policy's severity (high, medium, or low)")
 	flag.Parse()
 
-	assertValidFlags(*nsFlag, *nameFlag, clusterSelectors, patches, flag.Args())
+	assertValidFlags(*nsFlag, *nameFlag, *placementFlag, clusterSelectors, patches, flag.Args())
 
 	policyNamespace := *nsFlag
 	policyName := *nameFlag
@@ -397,6 +447,7 @@ func main() {
 	policyDisabled := *disabledFlag
 	policyRemAction := *remediationActionFlag
 	policySeverity := *severityFlag
+	placementPath := *placementFlag
 	objDefPaths := flag.Args()
 
 	if len(categories) == 0 {
@@ -475,15 +526,21 @@ func main() {
 
 	policyYAML, err := m.AsYaml()
 	if err != nil {
-		errorAndExit("Could not convert the configuration policy to YAML", err)
+		errorAndExit("Could not convert the configuration policy to YAML: %v", err)
 	}
 
-	policyYAML = *addCommentHeader(&policyYAML)
-	policyYAML = *addPlacementObjects(&policyYAML, policyNamespace, policyName, clusterSelectors)
+	allYAML := addCommentHeader(&policyYAML)
+	allYAML, err = addPlacementObjects(
+		allYAML, policyNamespace, policyName, placementPath, clusterSelectors,
+	)
+
+	if err != nil {
+		errorAndExit("Failed to generate the placement binding/rule: %v", err)
+	}
 
 	if outputPath != "" {
-		os.WriteFile(outputPath, policyYAML, 0444)
+		os.WriteFile(outputPath, *allYAML, 0444)
 	} else {
-		fmt.Println(string(policyYAML))
+		fmt.Println(string(*allYAML))
 	}
 }
