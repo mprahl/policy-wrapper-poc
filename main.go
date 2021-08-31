@@ -1,10 +1,9 @@
 // TODO: Add placement rule and placement binding support
-package main
+package policyGenerator
 
 import (
 	"bytes"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -13,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -33,16 +33,6 @@ var clusterSelectorRegex = regexp.MustCompile(`^(.+)=(.+)$`)
 
 // Create a new type for a list of Strings
 type stringList []string
-
-// Implement the flag.Value interface
-func (s *stringList) String() string {
-	return fmt.Sprintf("%v", *s)
-}
-
-func (s *stringList) Set(value string) error {
-	*s = strings.Split(value, ",")
-	return nil
-}
 
 func getPolicyConfigBase(name, namespace string) map[string]interface{} {
 	return map[string]interface{}{
@@ -156,11 +146,11 @@ func assertValidFlags(
 	objDefs []string,
 ) {
 	if policyName == "" {
-		errorAndExit("The -name flag must be set")
+		errorAndExit("The --name flag must be set")
 	}
 
 	if policyNamespace == "" {
-		errorAndExit("The -namespace flag must be set")
+		errorAndExit("The --namespace flag must be set")
 	}
 
 	if placementPath != "" {
@@ -401,45 +391,43 @@ func addPlacementObjects(
 }
 
 func main() {
-	nsFlag := flag.String("namespace", "replace-me", "the namespace for the policy")
-	nameFlag := flag.String("name", "replace-me", "the name for the policy")
-	var clusterSelectors stringList
-	flag.Var(
-		&clusterSelectors,
-		"cluster-selectors",
+	nsFlag := pflag.StringP("namespace", "n", "", "the namespace for the policy")
+	nameFlag := pflag.String("name", "", "the name for the policy")
+	clusterSelectors := pflag.StringSlice(
+		"cluster-selectors", []string{},
 		"a comma-separated list of placement rule cluster selectors; if not provided, the "+
-			"placement rule will be for all clusters; does not take effect if -placement is set",
+			"placement rule will be for all clusters; does not take effect if --placement is set",
 	)
-	outputFlag := flag.String("o", "", "the path to write the policy to; defaults to stdout")
-	placementFlag := flag.String(
-		"placement",
-		"",
-		"the path to the placement rule to use; takes precedence over -cluster-selectors",
+	outputFlag := pflag.StringP(
+		"output", "o", "", "the path to write the policy to; defaults to stdout",
 	)
-	var patches stringList
-	flag.Var(&patches, "patches", "a comma-separated list of Kustomize-like patches")
-	var categories stringList
-	flag.Var(
-		&categories,
-		"categories",
+	placementFlag := pflag.String(
+		"placement", "",
+		"the path to the placement rule to use; takes precedence over --cluster-selectors",
+	)
+	patches := pflag.StringSliceP(
+		"patches", "p", []string{}, "a comma-separated list of Kustomize-like patches",
+	)
+	categories := pflag.StringSlice(
+		"categories", stringList{"CM Configuration Management"},
 		"a comma-separated list of the policy's categories",
 	)
-	var controls stringList
-	flag.Var(
-		&controls,
-		"controls",
+	controls := pflag.StringSlice(
+		"controls", stringList{"CM-2 Baseline Configuration"},
 		"a comma-separated list of the policy's controls",
 	)
-	var standards stringList
-	flag.Var(&standards, "standards", "a comma-separated list of the policy's standards")
-	disabledFlag := flag.Bool("disabled", true, "determines if the policy is disabled")
-	remediationActionFlag := flag.String(
+	standards := pflag.StringSlice(
+		"standards", stringList{"NIST SP 800-53"},
+		"a comma-separated list of the policy's standards",
+	)
+	disabledFlag := pflag.Bool("disabled", true, "whether the policy is disabled")
+	remediationActionFlag := pflag.String(
 		"remediationAction", "inform", "the policy's remediation action (inform or enforce)",
 	)
-	severityFlag := flag.String("severity", "low", "the policy's severity (high, medium, or low)")
-	flag.Parse()
+	severityFlag := pflag.String("severity", "low", "the policy's severity (high, medium, or low)")
+	pflag.Parse()
 
-	assertValidFlags(*nsFlag, *nameFlag, *placementFlag, clusterSelectors, patches, flag.Args())
+	assertValidFlags(*nsFlag, *nameFlag, *placementFlag, *clusterSelectors, *patches, pflag.Args())
 
 	policyNamespace := *nsFlag
 	policyName := *nameFlag
@@ -448,24 +436,12 @@ func main() {
 	policyRemAction := *remediationActionFlag
 	policySeverity := *severityFlag
 	placementPath := *placementFlag
-	objDefPaths := flag.Args()
-
-	if len(categories) == 0 {
-		categories = stringList{"CM Configuration Management"}
-	}
-
-	if len(controls) == 0 {
-		controls = stringList{"CM-2 Baseline Configuration"}
-	}
-
-	if len(standards) == 0 {
-		standards = stringList{"NIST SP 800-53"}
-	}
+	objDefPaths := pflag.Args()
 
 	policyAnnotations := map[string]string{
-		"policy.open-cluster-management.io/categories": strings.Join(categories, ","),
-		"policy.open-cluster-management.io/controls":   strings.Join(controls, ","),
-		"policy.open-cluster-management.io/standards":  strings.Join(standards, ","),
+		"policy.open-cluster-management.io/categories": strings.Join(*categories, ","),
+		"policy.open-cluster-management.io/controls":   strings.Join(*controls, ","),
+		"policy.open-cluster-management.io/standards":  strings.Join(*standards, ","),
 	}
 
 	k := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
@@ -512,7 +488,7 @@ func main() {
 		errorAndExit("Failed to load %s in memory: %v", basePatchFilename, err)
 	}
 
-	err = prepareKustomizationEnv(fSys, patches, policyNamespace, policyName)
+	err = prepareKustomizationEnv(fSys, *patches, policyNamespace, policyName)
 	if err != nil {
 		// Indexing is safe here since the error message is always ASCII
 		errMsg := strings.ToUpper(string(err.Error()[0])) + string(err.Error()[1:])
@@ -531,7 +507,7 @@ func main() {
 
 	allYAML := addCommentHeader(&policyYAML)
 	allYAML, err = addPlacementObjects(
-		allYAML, policyNamespace, policyName, placementPath, clusterSelectors,
+		allYAML, policyNamespace, policyName, placementPath, *clusterSelectors,
 	)
 
 	if err != nil {
