@@ -27,6 +27,7 @@ const placementRuleAPIVersion = "apps.open-cluster-management.io/v1"
 const placementRuleKind = "PlacementRule"
 const placementBindingAPIVersion = "policy.open-cluster-management.io/v1"
 const placementBindingKind = "PlacementBinding"
+const basePatchFilename = "base-patch.yaml"
 
 var clusterSelectorRegex = regexp.MustCompile(`^(.+)=(.+)$`)
 
@@ -190,7 +191,7 @@ func prepareKustomizationEnv(
 	kustomizationYamlFile := map[string][]interface{}{
 		"resources": {"configurationpolicy.yaml"},
 		// Seed the dynamically created patch
-		"patchesStrategicMerge": {"patch.yaml"},
+		"patchesStrategicMerge": {basePatchFilename},
 	}
 
 	// Get all the patches
@@ -455,9 +456,9 @@ func main() {
 		errorAndExit("Failed to create a policy: %v", err)
 	}
 
-	err = fSys.WriteFile(path.Join(kustomizeDir, "patch.yaml"), patch)
+	err = fSys.WriteFile(path.Join(kustomizeDir, basePatchFilename), patch)
 	if err != nil {
-		errorAndExit("Failed to load patch.yaml in memory: %v", err)
+		errorAndExit("Failed to load %s in memory: %v", basePatchFilename, err)
 	}
 
 	err = prepareKustomizationEnv(fSys, patches, policyNamespace, policyName)
