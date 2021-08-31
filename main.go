@@ -1,5 +1,4 @@
-// TODO: Add placement rule and placement binding support
-package policyGenerator
+package main
 
 import (
 	"bytes"
