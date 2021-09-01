@@ -1,0 +1,11 @@
+apiVersion: policygenerator.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: policy-app-config
+  namespace: my-policies
+manifests:
+  - input/configmap.yaml
+clusterSelectors:
+  cloud: red hat
+# Optionally use this instead of clusterSelectors
+# placement: path/to/placement

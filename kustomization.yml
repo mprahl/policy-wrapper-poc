@@ -1,0 +1,4 @@
+generators:
+- input/policyGenerator.yaml
+patchesStrategicMerge:
+- input/patch.yaml
