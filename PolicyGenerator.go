@@ -7,7 +7,8 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"regexp"
+	"path"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,7 +16,6 @@ import (
 	"sigs.k8s.io/kustomize/api/resmap"
 )
 
-const kustomizeDir = "kustomization"
 const policyAPIVersion = "policy.open-cluster-management.io/v1"
 const policyKind = "Policy"
 const configPolicyKind = "ConfigurationPolicy"
@@ -23,22 +23,49 @@ const placementRuleAPIVersion = "apps.open-cluster-management.io/v1"
 const placementRuleKind = "PlacementRule"
 const placementBindingAPIVersion = "policy.open-cluster-management.io/v1"
 const placementBindingKind = "PlacementBinding"
-const basePatchFilename = "base-patch.yaml"
 
-var clusterSelectorRegex = regexp.MustCompile(`^(.+)=(.+)$`)
-
-// TODO: Should all the flags be accepted here?
-type plugin struct {
-	rf               *resmap.Factory
-	ClusterSelectors map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
-	Manifests        []string          `json:"manifests,omitempty" yaml:"manifests,omitempty"`
-	// Define the struct rather than embed ObjectMeta in order to just accept name and namespace
-	Metadata struct {
-		Name      string `json:"name,omitempty" yaml:"name,omitempty"`
-		Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	} `json:"metadata,omitempty" yaml:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+type policyConfig struct {
+	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+	Controls   []string `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Disabled   bool     `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+	// Make this a slice of structs in the event we want additional configuration related to
+	// a manifest such as accepting patches.
+	Manifests []struct {
+		Path string `json:"path,omitempty" yaml:"path,omitempty"`
+	} `json:"manifests,omitempty" yaml:"manifests,omitempty"`
+	Name string `json:"name,omitempty" yaml:"name,omitempty"`
 	// This is named Placement so that eventually PlacementRules and Placements will be supported
-	Placement    string `json:"placement,omitempty" yaml:"placement,omitempty"`
+	Placement struct {
+		ClusterSelectors  map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
+		PlacementRulePath string            `json:"placementRulePath,omitempty" yaml:"placementRulePath,omitempty"`
+	} `json:"placement,omitempty" yaml:"placement,omitempty"`
+	RemediationAction string   `json:"remediationAction,omitempty" yaml:"remediationAction,omitempty"`
+	Severity          string   `json:"severity,omitempty" yaml:"severity,omitempty"`
+	Standards         []string `json:"standards,omitempty" yaml:"standards,omitempty"`
+}
+
+type plugin struct {
+	rf       *resmap.Factory
+	Metadata struct {
+		Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	PlacementBindingDefaults struct {
+		Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	} `json:"placementBindingDefaults,omitempty" yaml:"placementBindingDefaults,omitempty"`
+	PolicyDefaults struct {
+		Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+		Controls   []string `json:"controls,omitempty" yaml:"controls,omitempty"`
+		Namespace  string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+		// This is named Placement so that eventually PlacementRules and Placements will be supported
+		Placement struct {
+			ClusterSelectors  map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
+			PlacementRulePath string            `json:"placementRulePath,omitempty" yaml:"placementRulePath,omitempty"`
+		} `json:"placement,omitempty" yaml:"placement,omitempty"`
+		RemediationAction string   `json:"remediationAction,omitempty" yaml:"remediationAction,omitempty"`
+		Severity          string   `json:"severity,omitempty" yaml:"severity,omitempty"`
+		Standards         []string `json:"standards,omitempty" yaml:"standards,omitempty"`
+	} `json:"policyDefaults,omitempty" yaml:"policyDefaults,omitempty"`
+	Policies     []policyConfig `json:"policies" yaml:"policies"`
 	outputBuffer bytes.Buffer
 }
 
@@ -53,55 +80,154 @@ func (p *plugin) Config(h *resmap.PluginHelpers, config []byte) error {
 		return err
 	}
 
-	return p.assertValidFlags()
+	p.applyDefaults()
+	return p.assertValidConfig()
 }
 
 func (p *plugin) Generate() (resmap.ResMap, error) {
-	err := p.createPolicy()
-	if err != nil {
-		return nil, err
+	for i := range p.Policies {
+		err := p.createPolicy(&p.Policies[i])
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	placementRuleName, err := p.createPlacementRule()
-	if err != nil {
-		return nil, err
+	plrNameToPolicyIdxs := map[string][]int{}
+	for i := range p.Policies {
+		plrName, err := p.getOrCreatePlacementRule(&p.Policies[i])
+		if err != nil {
+			return nil, err
+		}
+		plrNameToPolicyIdxs[plrName] = append(plrNameToPolicyIdxs[plrName], i)
 	}
 
-	err = p.createPlacementBinding(placementRuleName)
-	if err != nil {
-		return nil, err
+	plcBindingCount := 0
+	for plrName, policyIdxs := range plrNameToPolicyIdxs {
+		plcBindingCount += 1
+		policyConfs := []*policyConfig{}
+		for i := range policyIdxs {
+			policyConfs = append(policyConfs, &p.Policies[i])
+		}
+
+		var bindingName string
+		if plcBindingCount == 1 {
+			bindingName = p.PlacementBindingDefaults.Name
+		} else {
+			bindingName = fmt.Sprintf("%s%d", p.PlacementBindingDefaults.Name, plcBindingCount)
+		}
+
+		p.createPlacementBinding(bindingName, plrName, policyConfs)
 	}
 
 	return p.rf.NewResMapFromBytes(p.outputBuffer.Bytes())
 }
 
-func (p *plugin) assertValidFlags() error {
-	if p.Metadata.Name == "" {
-		return errors.New("metadata.name must be set")
+func (p *plugin) applyDefaults() {
+	if len(p.Policies) == 0 {
+		return
 	}
 
-	if p.Metadata.Namespace == "" {
-		return errors.New("metadata.namespace must be set")
+	if p.PlacementBindingDefaults.Name == "" && len(p.Policies) == 1 {
+		p.PlacementBindingDefaults.Name = "binding-" + p.Policies[0].Name
 	}
 
-	if p.Placement != "" {
-		if _, err := os.Stat(p.Placement); err != nil {
-			return fmt.Errorf("the placement at %s could not be read", p.Placement)
+	// Set defaults to the defaults that aren't overridden
+	if p.PolicyDefaults.Categories == nil {
+		p.PolicyDefaults.Categories = []string{"CM Configuration Management"}
+	}
+
+	if p.PolicyDefaults.Controls == nil {
+		p.PolicyDefaults.Controls = []string{"CM-2 Baseline Configuration"}
+	}
+
+	if p.PolicyDefaults.RemediationAction == "" {
+		p.PolicyDefaults.RemediationAction = "inform"
+	}
+
+	if p.PolicyDefaults.Severity == "" {
+		p.PolicyDefaults.Severity = "low"
+	}
+
+	if p.PolicyDefaults.Standards == nil {
+		p.PolicyDefaults.Standards = []string{"NIST SP 800-53"}
+	}
+
+	for i := range p.Policies {
+		if p.Policies[i].Categories == nil {
+			p.Policies[i].Categories = p.PolicyDefaults.Categories
+		}
+
+		if p.Policies[i].Controls == nil {
+			p.Policies[i].Controls = p.PolicyDefaults.Controls
+		}
+
+		if p.Policies[i].Placement.ClusterSelectors == nil {
+			p.Policies[i].Placement.ClusterSelectors = p.PolicyDefaults.Placement.ClusterSelectors
+		}
+
+		if p.Policies[i].Placement.PlacementRulePath == "" {
+			p.Policies[i].Placement.PlacementRulePath = p.PolicyDefaults.Placement.PlacementRulePath
+		}
+
+		if p.Policies[i].RemediationAction == "" {
+			p.Policies[i].RemediationAction = p.PolicyDefaults.RemediationAction
+		}
+
+		if p.Policies[i].Severity == "" {
+			p.Policies[i].Severity = p.PolicyDefaults.Severity
+		}
+
+		if p.Policies[i].Standards == nil {
+			p.Policies[i].Standards = p.PolicyDefaults.Standards
 		}
 	}
 
-	for _, m := range p.Manifests {
-		if _, err := os.Stat(m); err != nil {
-			return fmt.Errorf("the object manifest at %s could not be read", m)
+}
+
+// assertValidConfig verifies that the user provided configuration has all the
+// required fields. Note that this should be run only after applyDefaults is run.
+func (p *plugin) assertValidConfig() error {
+	if p.PlacementBindingDefaults.Name == "" {
+		return errors.New(
+			"placementBindingDefaults.name must be set when there are mutiple policies",
+		)
+	}
+
+	if p.PolicyDefaults.Namespace == "" {
+		return errors.New("policyDefaults.namespace is empty but it must be set")
+	}
+
+	if len(p.Policies) == 0 {
+		return errors.New("policies is empty but it must be set")
+	}
+
+	for i := range p.Policies {
+		if len(p.Policies[i].Manifests) == 0 {
+			return errors.New("each policy must have at least one manifest")
+		}
+
+		for _, manifest := range p.Policies[i].Manifests {
+			if manifest.Path == "" {
+				return errors.New("each policy manifest entry must have path set")
+			}
+
+			_, err := os.Stat(manifest.Path)
+			if err != nil {
+				return fmt.Errorf("could not read the manifest path %s", manifest.Path)
+			}
+		}
+
+		if p.Policies[i].Name == "" {
+			return errors.New("each policy must have a name set")
 		}
 	}
 
 	return nil
 }
 
-func (p *plugin) createPolicy() error {
+func (p *plugin) createPolicy(policyConf *policyConfig) error {
 
-	policyTemplate, err := getPolicyTemplate(p.Manifests)
+	policyTemplate, err := getPolicyTemplate(policyConf)
 	if err != nil {
 		return err
 	}
@@ -111,17 +237,17 @@ func (p *plugin) createPolicy() error {
 		"kind":       policyKind,
 		"metadata": map[string]interface{}{
 			"annotations": map[string]string{
-				"policy.open-cluster-management.io/categories": "CM Configuration Management",
-				"policy.open-cluster-management.io/controls":   "CM-2 Baseline Configuration",
-				"policy.open-cluster-management.io/standards":  "NIST SP 800-53",
+				"policy.open-cluster-management.io/categories": strings.Join(policyConf.Categories, ","),
+				"policy.open-cluster-management.io/controls":   strings.Join(policyConf.Controls, ","),
+				"policy.open-cluster-management.io/standards":  strings.Join(policyConf.Standards, ","),
 			},
-			"name":      p.Metadata.Name,
-			"namespace": p.Metadata.Namespace,
+			"name":      policyConf.Name,
+			"namespace": p.PolicyDefaults.Namespace,
 		},
 		"spec": map[string]interface{}{
-			"disabled":          true,
+			"disabled":          policyConf.Disabled,
 			"policy-templates":  []map[string]map[string]interface{}{*policyTemplate},
-			"remediationAction": "inform",
+			"remediationAction": policyConf.RemediationAction,
 		},
 	}
 
@@ -132,32 +258,74 @@ func (p *plugin) createPolicy() error {
 		)
 	}
 
+	p.outputBuffer.Write([]byte("---\n"))
 	p.outputBuffer.Write(policyYAML)
 	return nil
 }
 
-func getPolicyTemplate(manifestPaths []string) (*map[string]map[string]interface{}, error) {
+func getPolicyTemplate(policyConf *policyConfig) (
+	*map[string]map[string]interface{}, error,
+) {
 	manifests := []interface{}{}
-	for _, manifestPath := range manifestPaths {
-		manifestFile, err := unmarshalManifestFile(manifestPath)
+	for _, manifest := range policyConf.Manifests {
+		manifestPaths := []string{}
+		readErr := fmt.Errorf("failed to read the manifest directory %s", manifest.Path)
+		manifestPathInfo, err := os.Stat(manifest.Path)
 		if err != nil {
-			return nil, err
+			return nil, readErr
 		}
 
-		if len(*manifestFile) == 0 {
-			return nil, errors.New("manifest files cannot be empty")
+		if manifestPathInfo.IsDir() {
+			files, err := ioutil.ReadDir(manifest.Path)
+			if err != nil {
+				return nil, readErr
+			}
+
+			for _, f := range files {
+				if f.IsDir() {
+					continue
+				}
+
+				ext := path.Ext(f.Name())
+				if ext != ".yaml" && ext != ".yml" {
+					continue
+				}
+
+				yamlPath := path.Join(manifest.Path, f.Name())
+				manifestPaths = append(manifestPaths, yamlPath)
+			}
+		} else {
+			manifestPaths = append(manifestPaths, manifest.Path)
 		}
 
-		manifests = append(manifests, *manifestFile...)
+		for _, manifestPath := range manifestPaths {
+			manifestFile, err := unmarshalManifestFile(manifestPath)
+			if err != nil {
+				return nil, err
+			}
+
+			if len(*manifestFile) == 0 {
+				continue
+			}
+
+			manifests = append(manifests, *manifestFile...)
+		}
+	}
+
+	if len(manifests) == 0 {
+		return nil, fmt.Errorf(
+			"the policy %s must specify at least one non-empty manifest file", policyConf.Name,
+		)
 	}
 
 	policyTemplate := map[string]map[string]interface{}{
 		"objectDefinition": {
 			"apiVersion": policyAPIVersion,
 			"kind":       configPolicyKind,
+			"name":       policyConf.Name,
 			"spec": map[string]interface{}{
-				"remediationAction": "inform",
-				"severity":          "low",
+				"remediationAction": policyConf.RemediationAction,
+				"severity":          policyConf.Severity,
 				"object-templates":  manifests,
 			},
 		},
@@ -166,14 +334,15 @@ func getPolicyTemplate(manifestPaths []string) (*map[string]map[string]interface
 	return &policyTemplate, nil
 }
 
-func (p *plugin) createPlacementRule() (string, error) {
-	if p.Placement != "" {
-		manifests, err := unmarshalManifestFile(p.Placement)
+func (p *plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string, err error) {
+	plrPath := policyConf.Placement.PlacementRulePath
+	if plrPath != "" {
+		var manifests *[]interface{}
+		manifests, err = unmarshalManifestFile(plrPath)
 		if err != nil {
-			return "", err
+			return
 		}
 
-		var placementRuleName string
 		for _, manifest := range *manifests {
 			var object = manifest.(map[string]interface{})
 			if kind, _, _ := unstructured.NestedString(object, "kind"); kind != placementRuleKind {
@@ -181,25 +350,44 @@ func (p *plugin) createPlacementRule() (string, error) {
 			}
 
 			var found bool
-			placementRuleName, found, err = unstructured.NestedString(object, "metadata", "name")
+			name, found, err = unstructured.NestedString(object, "metadata", "name")
 			if !found || err != nil {
-				return "", fmt.Errorf("the placement %s must have a name set", p.Placement)
+				err = fmt.Errorf("the placement %s must have a name set", plrPath)
+				return
+			}
+
+			var namespace string
+			namespace, found, err = unstructured.NestedString(object, "metadata", "namespace")
+			if !found || err != nil {
+				err = fmt.Errorf("the placement %s must have a namespace set", plrPath)
+				return
+			}
+
+			if namespace != p.PolicyDefaults.Namespace {
+				err = fmt.Errorf(
+					"the placement %s must have the same namespace as the policy (%s)",
+					plrPath,
+					p.PolicyDefaults.Namespace,
+				)
+				return
 			}
 
 			break
 		}
 
-		if placementRuleName == "" {
-			return "", fmt.Errorf(
-				"the placement manifest %s did not have a placement rule", p.Placement,
+		if name == "" {
+			err = fmt.Errorf(
+				"the placement manifest %s did not have a placement rule", plrPath,
 			)
+
+			return
 		}
 
-		return placementRuleName, nil
+		return
 	}
 
 	matchExpressions := []map[string]interface{}{}
-	for label, value := range p.ClusterSelectors {
+	for label, value := range policyConf.Placement.ClusterSelectors {
 		matchExpression := map[string]interface{}{
 			"key":      label,
 			"operator": "In",
@@ -208,13 +396,13 @@ func (p *plugin) createPlacementRule() (string, error) {
 		matchExpressions = append(matchExpressions, matchExpression)
 	}
 
-	placementRuleName := "placement-" + p.Metadata.Name
+	name = "placement-" + policyConf.Name
 	rule := map[string]interface{}{
 		"apiVersion": placementRuleAPIVersion,
 		"kind":       placementRuleKind,
 		"metadata": map[string]interface{}{
-			"name":      placementRuleName,
-			"namespace": p.Metadata.Namespace,
+			"name":      name,
+			"namespace": p.PolicyDefaults.Namespace,
 		},
 		"spec": map[string]interface{}{
 			"clusterConditions": []map[string]string{
@@ -226,39 +414,48 @@ func (p *plugin) createPlacementRule() (string, error) {
 		},
 	}
 
-	ruleYAML, err := yaml.Marshal(rule)
+	var ruleYAML []byte
+	ruleYAML, err = yaml.Marshal(rule)
 	if err != nil {
-		return "", fmt.Errorf(
+		err = fmt.Errorf(
 			"an unexpected error occurred when converting the placement rule to YAML: %w", err,
 		)
+
+		return
 	}
 
 	p.outputBuffer.Write([]byte("---\n"))
 	p.outputBuffer.Write(ruleYAML)
 
-	return placementRuleName, nil
+	return
 }
 
-func (p *plugin) createPlacementBinding(placementRuleName string) error {
+func (p *plugin) createPlacementBinding(
+	bindingName, plrName string, policyConfs []*policyConfig,
+) error {
+	subjects := make([]map[string]string, 0, len(policyConfs))
+	for _, policyConf := range policyConfs {
+		subject := map[string]string{
+			"apiGroup": policyAPIVersion,
+			"kind":     policyKind,
+			"name":     policyConf.Name,
+		}
+		subjects = append(subjects, subject)
+	}
+
 	binding := map[string]interface{}{
 		"apiVersion": placementBindingAPIVersion,
 		"kind":       placementBindingKind,
 		"metadata": map[string]interface{}{
-			"name":      "binding-" + p.Metadata.Name,
-			"namespace": p.Metadata.Namespace,
+			"name":      bindingName,
+			"namespace": p.PolicyDefaults.Namespace,
 		},
 		"placementRef": map[string]string{
-			"name":     placementRuleName,
-			"kind":     placementRuleKind,
 			"apiGroup": placementRuleAPIVersion,
+			"name":     plrName,
+			"kind":     placementRuleKind,
 		},
-		"subjects": []map[string]string{
-			{
-				"name":     p.Metadata.Name,
-				"kind":     policyKind,
-				"apiGroup": policyAPIVersion,
-			},
-		},
+		"subjects": subjects,
 	}
 
 	bindingYAML, err := yaml.Marshal(binding)

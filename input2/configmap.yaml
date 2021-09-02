@@ -3,10 +3,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: game-config
+  name: game-config2
   namespace: default
 data:
   game.properties: |
-    enemies=aliens
+    enemies=goldfish  
   ui.properties: |
-    color.good=purple
+    color.good=neon-green
