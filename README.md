@@ -11,21 +11,13 @@ This is a prototype to show the usage of [kustomize](https://kustomize.io/) for 
 The following commands must be run for setup:
 
 ```bash
-# Compile the plugin in a temporary directory under $DEMO
-export DEMO=$(mktemp -d)
-export PLUGIN_ROOT_PARENT_DIR=$DEMO/kustomize/plugin/policygenerator.open-cluster-management.io/v1
-mkdir -p $PLUGIN_ROOT_PARENT_DIR
-export PLUGIN_ROOT=$PLUGIN_ROOT_PARENT_DIR/policygenerator
-go build -buildmode plugin -o $PLUGIN_ROOT/PolicyGenerator.so PolicyGenerator.go
-
-# Compile kustomize (required for Go based plugins)
-GO111MODULE=on go get sigs.k8s.io/kustomize/kustomize/v4
+make build
 ```
 
 The following command will utilize the `kustomization.yaml` in the root of the repository:
 
 ```bash
-XDG_CONFIG_HOME=$DEMO $(go env GOPATH)/bin/kustomize build --enable-alpha-plugins
+make generate
 ```
 
 Output:
@@ -126,4 +118,16 @@ spec:
         remediationAction: inform
         severity: medium
   remediationAction: inform
+```
+
+# Development
+
+In order to bypass Kustomize and display native Go output for debugging the plugin:
+
+```bash
+go build
+```
+
+```bash
+./PolicyGenerator <directory/or/file/path/1> ... <directory/or/file/path/n>
 ```

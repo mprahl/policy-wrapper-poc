@@ -1,0 +1,7 @@
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: policy-generator-init
+  namespace: policy-generator
+# Supply space-separated files or directories containing the PolicyGeneratorConfig manifests
+argsOneLiner: ./inputFiles ./input/policyGenerator.yaml

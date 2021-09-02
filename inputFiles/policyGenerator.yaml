@@ -1,31 +1,28 @@
 apiVersion: policy.open-cluster-management.io/v1
 kind: PolicyGeneratorConfig
 metadata:
-  name: policy-generator-name
+  name: policy-generator-name-2
 placementBindingDefaults:
-  name: my-placement-binding
+  name: my-placement-binding-2
 policyDefaults:
   # categories: []
   controls: 
     - PR.DS-1 Data-at-rest
-  namespace: my-policies
-  # Use an existing placement rule so that placement bindings can be consolidated
-  placement:
-    placementRulePath: input/plr.yaml
+  namespace: my-policies-2
   # Example of using clusterSelectors to generate a placement rule
-  # placement:
-  #   clusterSelectors:
-  #     cloud: red hat
+  placement:
+    clusterSelectors:
+      cloud: red hat
   remediationAction: inform
   severity: medium
   # standards: []
 policies:
-- name: policy-app-config
+- name: policy-app-config-2
   disabled: false
   manifests:
     - path: input/configmap.yaml
   remediationAction: enforce
-- name: policy-app-config2
+- name: policy-app-config2-2
   disabled: true
   manifests:
     - path: input2

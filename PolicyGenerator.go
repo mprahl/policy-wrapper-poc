@@ -12,8 +12,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	"sigs.k8s.io/kustomize/api/resmap"
 )
 
 const policyAPIVersion = "policy.open-cluster-management.io/v1"
@@ -45,7 +43,6 @@ type policyConfig struct {
 }
 
 type plugin struct {
-	rf       *resmap.Factory
 	Metadata struct {
 		Name string `json:"name,omitempty" yaml:"name,omitempty"`
 	} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
@@ -69,12 +66,58 @@ type plugin struct {
 	outputBuffer bytes.Buffer
 }
 
-//nolint: golint
-//noinspection GoUnusedGlobalVariable
-var KustomizePlugin plugin
+func main() {
+	index := 2
+	if os.Args[0] == "./PolicyGenerator" {
+		index = 1
+	}
+	paths := os.Args[index:]
+	var outputBuffer bytes.Buffer
 
-func (p *plugin) Config(h *resmap.PluginHelpers, config []byte) error {
-	p.rf = h.ResmapFactory()
+	for _, path := range paths {
+		dir, err := os.ReadDir(path)
+		if err != nil {
+			p := plugin{}
+			file, err := os.ReadFile(path)
+			if err != nil {
+				panic(err)
+			} else {
+				err := p.Config(file)
+				if err != nil {
+					panic(err)
+				}
+				output, err := p.Generate()
+				if err != nil {
+					panic(err)
+				}
+				outputBuffer.Write(output)
+			}
+		} else {
+			for _, entry := range dir {
+				if !entry.IsDir() {
+					file, err := os.ReadFile(path + "/" + entry.Name())
+					if err != nil {
+						panic(err)
+					} else {
+						p := plugin{}
+						err := p.Config(file)
+						if err != nil {
+							panic(err)
+						}
+						output, err := p.Generate()
+						if err != nil {
+							panic(err)
+						}
+						outputBuffer.Write(output)
+					}
+				}
+			}
+		}
+	}
+	fmt.Println(outputBuffer.String())
+}
+
+func (p *plugin) Config(config []byte) error {
 	err := yaml.Unmarshal(config, p)
 	if err != nil {
 		return err
@@ -84,7 +127,7 @@ func (p *plugin) Config(h *resmap.PluginHelpers, config []byte) error {
 	return p.assertValidConfig()
 }
 
-func (p *plugin) Generate() (resmap.ResMap, error) {
+func (p *plugin) Generate() ([]byte, error) {
 	for i := range p.Policies {
 		err := p.createPolicy(&p.Policies[i])
 		if err != nil {
@@ -119,7 +162,7 @@ func (p *plugin) Generate() (resmap.ResMap, error) {
 		p.createPlacementBinding(bindingName, plrName, policyConfs)
 	}
 
-	return p.rf.NewResMapFromBytes(p.outputBuffer.Bytes())
+	return p.outputBuffer.Bytes(), nil
 }
 
 func (p *plugin) applyDefaults() {
