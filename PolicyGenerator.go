@@ -67,22 +67,43 @@ type plugin struct {
 }
 
 func main() {
+	// When executing with `kustomize build`
 	index := 2
+	// When executing with `./PolicyGenerator` directly
 	if os.Args[0] == "./PolicyGenerator" {
 		index = 1
 	}
-	paths := os.Args[index:]
+	argpaths := os.Args[index:]
 	var outputBuffer bytes.Buffer
 
-	for _, path := range paths {
-		dir, err := os.ReadDir(path)
+	for _, argpath := range argpaths {
+		dir, err := os.ReadDir(argpath)
 		if err != nil {
 			p := plugin{}
-			file, err := os.ReadFile(path)
+			file, err := os.ReadFile(argpath)
 			if err != nil {
 				panic(err)
-			} else {
-				err := p.Config(file)
+			}
+			err = p.Config(file)
+			if err != nil {
+				panic(err)
+			}
+			output, err := p.Generate()
+			if err != nil {
+				panic(err)
+			}
+			outputBuffer.Write(output)
+		} else {
+			for _, entry := range dir {
+				if entry.IsDir() {
+					continue
+				}
+				file, err := os.ReadFile(path.Join(argpath, entry.Name()))
+				if err != nil {
+					panic(err)
+				}
+				p := plugin{}
+				err = p.Config(file)
 				if err != nil {
 					panic(err)
 				}
@@ -91,26 +112,6 @@ func main() {
 					panic(err)
 				}
 				outputBuffer.Write(output)
-			}
-		} else {
-			for _, entry := range dir {
-				if !entry.IsDir() {
-					file, err := os.ReadFile(path + "/" + entry.Name())
-					if err != nil {
-						panic(err)
-					} else {
-						p := plugin{}
-						err := p.Config(file)
-						if err != nil {
-							panic(err)
-						}
-						output, err := p.Generate()
-						if err != nil {
-							panic(err)
-						}
-						outputBuffer.Write(output)
-					}
-				}
 			}
 		}
 	}
