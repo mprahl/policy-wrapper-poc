@@ -109,8 +109,9 @@ func parseDir(pathname string, outputBuffer *bytes.Buffer) {
 		filePath := path.Join(pathname, entry.Name())
 		if entry.IsDir() {
 			parseDir(filePath, outputBuffer)
+		} else {
+			outputBuffer.Write(p.ReadGeneratorConfig(filePath))
 		}
-		outputBuffer.Write(p.ReadGeneratorConfig(filePath))
 	}
 }
 
