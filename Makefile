@@ -8,5 +8,4 @@ build:
 	cp PolicyGenerator $(API_PLUGIN_PATH)
 
 generate:
-	echo $(KUSTOMIZE_PLUGIN_HOME)
-	# @KUSTOMIZE_PLUGIN_HOME=$(KUSTOMIZE_PLUGIN_HOME) kustomize build --enable-alpha-plugins
+	@KUSTOMIZE_PLUGIN_HOME=$(KUSTOMIZE_PLUGIN_HOME) kustomize build --enable-alpha-plugins
