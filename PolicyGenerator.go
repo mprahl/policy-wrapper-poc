@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -21,6 +22,8 @@ const placementRuleAPIVersion = "apps.open-cluster-management.io/v1"
 const placementRuleKind = "PlacementRule"
 const placementBindingAPIVersion = "policy.open-cluster-management.io/v1"
 const placementBindingKind = "PlacementBinding"
+
+var debug = false
 
 type policyConfig struct {
 	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
@@ -67,55 +70,65 @@ type plugin struct {
 }
 
 func main() {
-	// When executing with `kustomize build`
-	index := 2
+	debugFlag := pflag.Bool("debug", false, "Print the stack trace with error messages")
+	pflag.Parse()
+	debug = *debugFlag
+	argpaths := pflag.Args()
+	// When executing with `kustomize build`, need to account for additional argument
+	index := 1
 	// When executing with `./PolicyGenerator` directly
 	if os.Args[0] == "./PolicyGenerator" {
-		index = 1
+		index = 0
 	}
-	argpaths := os.Args[index:]
+	generators := argpaths[index:]
 	var outputBuffer bytes.Buffer
 
-	for _, argpath := range argpaths {
-		dir, err := os.ReadDir(argpath)
-		if err != nil {
-			p := plugin{}
-			file, err := os.ReadFile(argpath)
-			if err != nil {
-				panic(err)
-			}
-			err = p.Config(file)
-			if err != nil {
-				panic(err)
-			}
-			output, err := p.Generate()
-			if err != nil {
-				panic(err)
-			}
-			outputBuffer.Write(output)
-		} else {
-			for _, entry := range dir {
-				if entry.IsDir() {
-					continue
-				}
-				file, err := os.ReadFile(path.Join(argpath, entry.Name()))
-				if err != nil {
-					panic(err)
-				}
-				p := plugin{}
-				err = p.Config(file)
-				if err != nil {
-					panic(err)
-				}
-				output, err := p.Generate()
-				if err != nil {
-					panic(err)
-				}
-				outputBuffer.Write(output)
-			}
-		}
+	for _, argpath := range generators {
+		parseDir(argpath, &outputBuffer)
 	}
 	fmt.Println(outputBuffer.String())
+}
+
+func errorHandler(msg string, err error) {
+	if msg == "" || debug {
+		panic(err)
+	}
+	fmt.Fprintln(os.Stderr, msg)
+	os.Exit(1)
+}
+
+func parseDir(pathname string, outputBuffer *bytes.Buffer) {
+	dir, err := os.ReadDir(pathname)
+	p := plugin{}
+	if err != nil {
+		// Path was not a directory--return file
+		outputBuffer.Write(p.ReadGeneratorConfig(pathname))
+	}
+	// Path is a directory--parse through its files
+	for _, entry := range dir {
+		filePath := path.Join(pathname, entry.Name())
+		if entry.IsDir() {
+			parseDir(filePath, outputBuffer)
+		}
+		outputBuffer.Write(p.ReadGeneratorConfig(filePath))
+	}
+}
+
+func (p *plugin) ReadGeneratorConfig(filePath string) []byte {
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		errorHandler("failed to read file '"+filePath+"'", err)
+	}
+	err = p.Config(fileData)
+	if err != nil {
+		errorHandler("error parsing config file '"+filePath+"': "+err.Error(), err)
+	}
+	generatedOutput, err := p.Generate()
+	if err != nil {
+		errorHandler("error generating policies from config file '"+filePath+"': "+err.Error(), err)
+	}
+
+	return generatedOutput
 }
 
 func (p *plugin) Config(config []byte) error {
