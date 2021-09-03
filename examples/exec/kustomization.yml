@@ -1,5 +1,5 @@
 generators:
-- input/policyGenerator.yaml
+- policyGeneratorInit.yaml
 patchesStrategicMerge:
 - input/patch.yaml
 commonLabels:

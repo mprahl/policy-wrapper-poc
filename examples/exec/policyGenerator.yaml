@@ -1,5 +1,5 @@
-apiVersion: policygenerator.open-cluster-management.io/v1
-kind: PolicyGenerator
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGeneratorConfig
 metadata:
   name: policy-generator-name
 placementBindingDefaults:
@@ -11,7 +11,7 @@ policyDefaults:
   namespace: my-policies
   # Use an existing placement rule so that placement bindings can be consolidated
   placement:
-    placementRulePath: input/plr.yaml
+    placementRulePath: examples/exec/input/plr.yaml
   # Example of using clusterSelectors to generate a placement rule
   # placement:
   #   clusterSelectors:
@@ -23,9 +23,9 @@ policies:
 - name: policy-app-config
   disabled: false
   manifests:
-    - path: input/configmap.yaml
+    - path: examples/exec/input/configmap.yaml
   remediationAction: enforce
 - name: policy-app-config2
   disabled: true
   manifests:
-    - path: input2
+    - path: examples/exec/input2
