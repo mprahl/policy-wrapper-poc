@@ -16,7 +16,7 @@ export DEMO=$(mktemp -d)
 export PLUGIN_ROOT_PARENT_DIR=$DEMO/kustomize/plugin/policygenerator.open-cluster-management.io/v1
 mkdir -p $PLUGIN_ROOT_PARENT_DIR
 export PLUGIN_ROOT=$PLUGIN_ROOT_PARENT_DIR/policygenerator
-go build -buildmode plugin -o $PLUGIN_ROOT/PolicyGenerator.so PolicyGenerator.go
+go build -buildmode plugin -o $PLUGIN_ROOT/PolicyGenerator.so cmd/native/main.go
 
 # Compile kustomize (required for Go based plugins)
 GO111MODULE=on go get sigs.k8s.io/kustomize/kustomize/v4

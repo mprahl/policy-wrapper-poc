@@ -1,19 +1,14 @@
-package main
+package internal
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
-	"path"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
-	"sigs.k8s.io/kustomize/api/resmap"
 )
 
 const policyAPIVersion = "policy.open-cluster-management.io/v1"
@@ -44,8 +39,7 @@ type policyConfig struct {
 	Standards         []string `json:"standards,omitempty" yaml:"standards,omitempty"`
 }
 
-type plugin struct {
-	rf       *resmap.Factory
+type Plugin struct {
 	Metadata struct {
 		Name string `json:"name,omitempty" yaml:"name,omitempty"`
 	} `json:"metadata,omitempty" yaml:"metadata,omitempty"`
@@ -69,29 +63,22 @@ type plugin struct {
 	outputBuffer bytes.Buffer
 }
 
-//nolint: golint
-//noinspection GoUnusedGlobalVariable
-var KustomizePlugin plugin
-
-func (p *plugin) Config(h *resmap.PluginHelpers, config []byte) error {
-	p.rf = h.ResmapFactory()
+func (p *Plugin) Config(config []byte) error {
 	err := yaml.Unmarshal(config, p)
 	if err != nil {
 		return err
 	}
-
 	p.applyDefaults()
 	return p.assertValidConfig()
 }
 
-func (p *plugin) Generate() (resmap.ResMap, error) {
+func (p *Plugin) Generate() ([]byte, error) {
 	for i := range p.Policies {
 		err := p.createPolicy(&p.Policies[i])
 		if err != nil {
 			return nil, err
 		}
 	}
-
 	plrNameToPolicyIdxs := map[string][]int{}
 	for i := range p.Policies {
 		plrName, err := p.getOrCreatePlacementRule(&p.Policies[i])
@@ -100,7 +87,6 @@ func (p *plugin) Generate() (resmap.ResMap, error) {
 		}
 		plrNameToPolicyIdxs[plrName] = append(plrNameToPolicyIdxs[plrName], i)
 	}
-
 	plcBindingCount := 0
 	for plrName, policyIdxs := range plrNameToPolicyIdxs {
 		plcBindingCount += 1
@@ -108,21 +94,19 @@ func (p *plugin) Generate() (resmap.ResMap, error) {
 		for i := range policyIdxs {
 			policyConfs = append(policyConfs, &p.Policies[i])
 		}
-
 		var bindingName string
 		if plcBindingCount == 1 {
 			bindingName = p.PlacementBindingDefaults.Name
 		} else {
 			bindingName = fmt.Sprintf("%s%d", p.PlacementBindingDefaults.Name, plcBindingCount)
 		}
-
 		p.createPlacementBinding(bindingName, plrName, policyConfs)
 	}
 
-	return p.rf.NewResMapFromBytes(p.outputBuffer.Bytes())
+	return p.outputBuffer.Bytes(), nil
 }
 
-func (p *plugin) applyDefaults() {
+func (p *Plugin) applyDefaults() {
 	if len(p.Policies) == 0 {
 		return
 	}
@@ -186,7 +170,7 @@ func (p *plugin) applyDefaults() {
 
 // assertValidConfig verifies that the user provided configuration has all the
 // required fields. Note that this should be run only after applyDefaults is run.
-func (p *plugin) assertValidConfig() error {
+func (p *Plugin) assertValidConfig() error {
 	if p.PlacementBindingDefaults.Name == "" {
 		return errors.New(
 			"placementBindingDefaults.name must be set when there are mutiple policies",
@@ -225,7 +209,7 @@ func (p *plugin) assertValidConfig() error {
 	return nil
 }
 
-func (p *plugin) createPolicy(policyConf *policyConfig) error {
+func (p *Plugin) createPolicy(policyConf *policyConfig) error {
 
 	policyTemplate, err := getPolicyTemplate(policyConf)
 	if err != nil {
@@ -263,78 +247,7 @@ func (p *plugin) createPolicy(policyConf *policyConfig) error {
 	return nil
 }
 
-func getPolicyTemplate(policyConf *policyConfig) (
-	*map[string]map[string]interface{}, error,
-) {
-	manifests := []interface{}{}
-	for _, manifest := range policyConf.Manifests {
-		manifestPaths := []string{}
-		readErr := fmt.Errorf("failed to read the manifest directory %s", manifest.Path)
-		manifestPathInfo, err := os.Stat(manifest.Path)
-		if err != nil {
-			return nil, readErr
-		}
-
-		if manifestPathInfo.IsDir() {
-			files, err := ioutil.ReadDir(manifest.Path)
-			if err != nil {
-				return nil, readErr
-			}
-
-			for _, f := range files {
-				if f.IsDir() {
-					continue
-				}
-
-				ext := path.Ext(f.Name())
-				if ext != ".yaml" && ext != ".yml" {
-					continue
-				}
-
-				yamlPath := path.Join(manifest.Path, f.Name())
-				manifestPaths = append(manifestPaths, yamlPath)
-			}
-		} else {
-			manifestPaths = append(manifestPaths, manifest.Path)
-		}
-
-		for _, manifestPath := range manifestPaths {
-			manifestFile, err := unmarshalManifestFile(manifestPath)
-			if err != nil {
-				return nil, err
-			}
-
-			if len(*manifestFile) == 0 {
-				continue
-			}
-
-			manifests = append(manifests, *manifestFile...)
-		}
-	}
-
-	if len(manifests) == 0 {
-		return nil, fmt.Errorf(
-			"the policy %s must specify at least one non-empty manifest file", policyConf.Name,
-		)
-	}
-
-	policyTemplate := map[string]map[string]interface{}{
-		"objectDefinition": {
-			"apiVersion": policyAPIVersion,
-			"kind":       configPolicyKind,
-			"name":       policyConf.Name,
-			"spec": map[string]interface{}{
-				"remediationAction": policyConf.RemediationAction,
-				"severity":          policyConf.Severity,
-				"object-templates":  manifests,
-			},
-		},
-	}
-
-	return &policyTemplate, nil
-}
-
-func (p *plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string, err error) {
+func (p *Plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string, err error) {
 	plrPath := policyConf.Placement.PlacementRulePath
 	if plrPath != "" {
 		var manifests *[]interface{}
@@ -430,7 +343,7 @@ func (p *plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string
 	return
 }
 
-func (p *plugin) createPlacementBinding(
+func (p *Plugin) createPlacementBinding(
 	bindingName, plrName string, policyConfs []*policyConfig,
 ) error {
 	subjects := make([]map[string]string, 0, len(policyConfs))
@@ -469,38 +382,4 @@ func (p *plugin) createPlacementBinding(
 	p.outputBuffer.Write(bindingYAML)
 
 	return nil
-}
-
-// unmarshalManifestFile unmarshals the input object manifest/definition file into
-// a slice in order to account for multiple YAML documents in the same file.
-// If the file cannot be decoded or each document is not a map, an error will
-// be returned.
-func unmarshalManifestFile(manifestPath string) (*[]interface{}, error) {
-	manifestBytes, err := ioutil.ReadFile(manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read the manifest file %s", manifestPath)
-	}
-
-	yamlDocs := []interface{}{}
-	d := yaml.NewDecoder(bytes.NewReader(manifestBytes))
-	for {
-		var obj interface{}
-		err := d.Decode(&obj)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-
-			return nil, err
-		}
-
-		if _, ok := obj.(map[string]interface{}); !ok {
-			err := errors.New("the input manifests must be in the format of YAML objects")
-			return nil, err
-		}
-
-		yamlDocs = append(yamlDocs, obj)
-	}
-
-	return &yamlDocs, nil
 }
