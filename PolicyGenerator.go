@@ -70,22 +70,27 @@ type plugin struct {
 }
 
 func main() {
+	// Parse command input
 	debugFlag := pflag.Bool("debug", false, "Print the stack trace with error messages")
 	pflag.Parse()
 	debug = *debugFlag
 	argpaths := pflag.Args()
-	// When executing with `kustomize build`, need to account for additional argument
+
+	// Handle 'kustomize build' vs running the binary 'PolicyGenerator' directly
 	index := 1
-	// When executing with `./PolicyGenerator` directly
 	if os.Args[0] == "./PolicyGenerator" {
 		index = 0
 	}
+
+	// Collect and parse PolicyGeneratorConfig file paths
 	generators := argpaths[index:]
 	var outputBuffer bytes.Buffer
 
 	for _, argpath := range generators {
 		parseDir(argpath, &outputBuffer)
 	}
+
+	// Output results to stdout for Kustomize to handle
 	fmt.Println(outputBuffer.String())
 }
 
@@ -120,10 +125,12 @@ func (p *plugin) ReadGeneratorConfig(filePath string) []byte {
 	if err != nil {
 		errorHandler("failed to read file '"+filePath+"'", err)
 	}
+
 	err = p.Config(fileData)
 	if err != nil {
 		errorHandler("error parsing config file '"+filePath+"': "+err.Error(), err)
 	}
+
 	generatedOutput, err := p.Generate()
 	if err != nil {
 		errorHandler("error generating policies from config file '"+filePath+"': "+err.Error(), err)
