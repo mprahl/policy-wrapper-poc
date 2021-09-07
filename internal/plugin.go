@@ -19,8 +19,6 @@ const placementRuleKind = "PlacementRule"
 const placementBindingAPIVersion = "policy.open-cluster-management.io/v1"
 const placementBindingKind = "PlacementBinding"
 
-var debug = false
-
 type policyConfig struct {
 	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
 	Controls   []string `json:"controls,omitempty" yaml:"controls,omitempty"`
