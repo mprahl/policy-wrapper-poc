@@ -72,13 +72,17 @@ type plugin struct {
 func main() {
 	// Parse command input
 	debugFlag := pflag.Bool("debug", false, "Print the stack trace with error messages")
+	standaloneFlag := pflag.Bool("standalone", false, "Run the generator binary outside of Kustomize")
 	pflag.Parse()
 	debug = *debugFlag
+	standalone := *standaloneFlag
 	argpaths := pflag.Args()
 
-	// Handle 'kustomize build' vs running the binary 'PolicyGenerator' directly
+	// Handle 'kustomize build' vs running the binary 'PolicyGenerator' directly, since
+	// kustomize runs the binary with the PolicyGenerator manifest as the first argument:
+	// path/to/plugin/PolicyGenerator tmp/dir/cached-manifest <args>
 	index := 1
-	if os.Args[0] == "./PolicyGenerator" {
+	if standalone {
 		index = 0
 	}
 
@@ -94,11 +98,15 @@ func main() {
 	fmt.Println(outputBuffer.String())
 }
 
-func errorHandler(msg string, err error) {
+func errorAndExit(msg string, formatArgs ...interface{}) {
+	printArgs := make([]interface{}, len(formatArgs))
+	copy(printArgs, formatArgs)
+	// Show trace if the debug flag is set
 	if msg == "" || debug {
-		panic(err)
+		panic(fmt.Sprintf(msg, printArgs...))
 	}
-	fmt.Fprintln(os.Stderr, msg)
+	fmt.Fprintf(os.Stderr, msg, printArgs...)
+	fmt.Fprint(os.Stderr, "\n")
 	os.Exit(1)
 }
 
@@ -123,17 +131,17 @@ func parseDir(pathname string, outputBuffer *bytes.Buffer) {
 func (p *plugin) ReadGeneratorConfig(filePath string) []byte {
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
-		errorHandler("failed to read file '"+filePath+"'", err)
+		errorAndExit("failed to read file '%s': %s", filePath, err)
 	}
 
 	err = p.Config(fileData)
 	if err != nil {
-		errorHandler("error parsing config file '"+filePath+"': "+err.Error(), err)
+		errorAndExit("error parsing config file '%s': %s", filePath, err)
 	}
 
 	generatedOutput, err := p.Generate()
 	if err != nil {
-		errorHandler("error generating policies from config file '"+filePath+"': "+err.Error(), err)
+		errorAndExit("error generating policies from config file '%s': %s", filePath, err)
 	}
 
 	return generatedOutput
