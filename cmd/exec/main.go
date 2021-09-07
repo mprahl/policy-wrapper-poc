@@ -4,59 +4,60 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"path"
 
 	"github.com/mprahl/policygenerator/internal"
+	"github.com/spf13/pflag"
 )
 
-func main() {
-	// When executing with `kustomize build`
-	index := 2
-	// When executing with `./PolicyGenerator` directly
-	if os.Args[0] == "./PolicyGenerator" {
-		index = 1
-	}
-	argpaths := os.Args[index:]
-	var outputBuffer bytes.Buffer
+var debug = false
 
-	for _, argpath := range argpaths {
-		dir, err := os.ReadDir(argpath)
-		if err != nil {
-			p := internal.Plugin{}
-			file, err := os.ReadFile(argpath)
-			if err != nil {
-				panic(err)
-			}
-			err = p.Config(file)
-			if err != nil {
-				panic(err)
-			}
-			output, err := p.Generate()
-			if err != nil {
-				panic(err)
-			}
-			outputBuffer.Write(output)
-		} else {
-			for _, entry := range dir {
-				if entry.IsDir() {
-					continue
-				}
-				file, err := os.ReadFile(path.Join(argpath, entry.Name()))
-				if err != nil {
-					panic(err)
-				}
-				p := internal.Plugin{}
-				err = p.Config(file)
-				if err != nil {
-					panic(err)
-				}
-				output, err := p.Generate()
-				if err != nil {
-					panic(err)
-				}
-				outputBuffer.Write(output)
-			}
-		}
+func main() {
+	// Parse command input
+	debugFlag := pflag.Bool("debug", false, "Print the stack trace with error messages")
+	pflag.Parse()
+	debug = *debugFlag
+
+	// Collect and parse PolicyGeneratorConfig file paths
+	generators := pflag.Args()
+	var outputBuffer bytes.Buffer
+	for _, gen := range generators {
+		outputBuffer.Write(processGeneratorConfig(gen))
 	}
+
+	// Output results to stdout for Kustomize to handle
 	fmt.Println(outputBuffer.String())
+}
+
+// Error handler
+func errorAndExit(msg string, formatArgs ...interface{}) {
+	printArgs := make([]interface{}, len(formatArgs))
+	copy(printArgs, formatArgs)
+	// Show trace if the debug flag is set
+	if msg == "" || debug {
+		panic(fmt.Sprintf(msg, printArgs...))
+	}
+	fmt.Fprintf(os.Stderr, msg, printArgs...)
+	fmt.Fprint(os.Stderr, "\n")
+	os.Exit(1)
+}
+
+// Process generator file
+func processGeneratorConfig(filePath string) []byte {
+	p := internal.Plugin{}
+	fileData, err := os.ReadFile(filePath)
+	if err != nil {
+		errorAndExit("failed to read file '%s': %s", filePath, err)
+	}
+
+	err = p.Config(fileData)
+	if err != nil {
+		errorAndExit("error parsing config file '%s': %s", filePath, err)
+	}
+
+	generatedOutput, err := p.Generate()
+	if err != nil {
+		errorAndExit("error generating policies from config file '%s': %s", filePath, err)
+	}
+
+	return generatedOutput
 }
