@@ -21,7 +21,7 @@ func main() {
 	generators := pflag.Args()
 	var outputBuffer bytes.Buffer
 	for _, gen := range generators {
-		outputBuffer.Write(ReadGeneratorConfig(gen))
+		outputBuffer.Write(processGeneratorConfig(gen))
 	}
 
 	// Output results to stdout for Kustomize to handle
@@ -42,7 +42,7 @@ func errorAndExit(msg string, formatArgs ...interface{}) {
 }
 
 // Process generator file
-func ReadGeneratorConfig(filePath string) []byte {
+func processGeneratorConfig(filePath string) []byte {
 	p := internal.Plugin{}
 	fileData, err := os.ReadFile(filePath)
 	if err != nil {
