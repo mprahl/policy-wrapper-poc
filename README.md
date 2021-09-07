@@ -131,7 +131,7 @@ spec:
 
 ### As a standalone binary
 
-In order to bypass Kustomize and run the generator plugin binary directly:
+In order to bypass Kustomize and run the generator binary directly:
 
 1. Build the binary:
     ```bash
