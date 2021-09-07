@@ -25,4 +25,4 @@ policies:
 - name: policy-app-config2-2
   disabled: true
   manifests:
-    - path: input2
+    - path: input2/
