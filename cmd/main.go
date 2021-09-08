@@ -25,7 +25,7 @@ func main() {
 	}
 
 	// Output results to stdout for Kustomize to handle
-	fmt.Println(outputBuffer.String())
+	fmt.Print(outputBuffer.String())
 }
 
 // Error handler

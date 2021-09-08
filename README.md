@@ -4,24 +4,33 @@
 
 This is a prototype to show the usage of [kustomize](https://kustomize.io/) for wrapping policies.
 
-## Examples
+## Using the Policy Generator
 
-### With a Kustomize Patch
+### As a Kustomize plugin
 
-The following commands must be run for setup:
+1. Build the plugin binary (only needed once or to update the plugin):
+    ```bash
+    make build
+    ```
+    **NOTE:** This will default to placing the binary in `${HOME}/.config/kustomize/plugin/`. You can change this by exporting `KUSTOMIZE_PLUGIN_HOME` to a different path.
 
-```bash
-make build
-```
+2. Create a `kustomization.yaml` file that points to `PolicyGenerator` manifest(s), with any additional desired patches or customizations (see [`examples/policyGenerator.yaml`](./examples/policyGenerator.yaml) for an example):
+    ```yaml
+    generators:
+    - path/to/generator/file.yaml
+    ```
 
-The following command will utilize the `kustomization.yaml` in the root of the repository:
+3. To use the plugin to generate policies, do one of:
+    - Utilize the `kustomization.yaml` in the `examples/` directory of the repository (the directory can be modified by exporting a new path to `SOURCE_DIR`):
+      ```bash
+      make generate
+      ```
+    - From any directory with a `kustomization.yaml` file pointing to `PolicyGenerator` manifests:
+      ```bash
+      kustomize build --enable-alpha-plugins
+      ```
 
-```bash
-make generate
-```
-
-Output:
-
+**Output from `examples/`:**
 ```yaml
 apiVersion: policy.open-cluster-management.io/v1
 kind: PlacementBinding
@@ -120,14 +129,22 @@ spec:
   remediationAction: inform
 ```
 
-# Development
+### As a standalone binary
 
-In order to bypass Kustomize and display native Go output for debugging the plugin:
+In order to bypass Kustomize and run the generator binary directly:
 
-```bash
-go build
-```
+1. Build the binary:
+    ```bash
+    make build-binary
+    ```
 
-```bash
-./PolicyGenerator <directory/or/file/path/1> ... <directory/or/file/path/n>
-```
+2. Run the binary from the location of the PolicyGenerator manifest(s):
+    ```bash
+    path/to/PolicyGenerator <path/to/file/1> ... <path/to/file/n>
+    ```
+    - For example:
+      ```bash
+      cd examples
+      ../PolicyGenerator policyGenerator.yaml
+      ```
+    **NOTE:** To print the trace, you can add the `--debug` flag to the arguments.
