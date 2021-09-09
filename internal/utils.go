@@ -74,7 +74,7 @@ func getPolicyTemplate(policyConf *policyConfig) (
 	objectTemplates := make([]map[string]interface{}, 0, len(manifests))
 	for _, manifest := range manifests {
 		objTemplate := map[string]interface{}{
-			"complianceType":   "musthave",
+			"complianceType":   policyConf.ComplianceType,
 			"objectDefinition": manifest,
 		}
 		objectTemplates = append(objectTemplates, objTemplate)

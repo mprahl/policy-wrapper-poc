@@ -62,6 +62,7 @@ data:
 	}
 	for _, test := range tests {
 		policyConf := policyConfig{
+			ComplianceType:    "musthave",
 			Manifests:         test.Manifests,
 			Name:              "policy-app-config",
 			RemediationAction: "inform",
@@ -93,6 +94,7 @@ data:
 func TestGetPolicyTemplateNoManifests(t *testing.T) {
 	tmpDir := t.TempDir()
 	policyConf := policyConfig{
+		ComplianceType:    "musthave",
 		Manifests:         []manifest{{tmpDir}},
 		Name:              "policy-app-config",
 		RemediationAction: "inform",
@@ -112,6 +114,7 @@ func TestGetPolicyTemplateInvalidPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	manifestPath := path.Join(tmpDir, "does-not-exist.yaml")
 	policyConf := policyConfig{
+		ComplianceType:    "musthave",
 		Manifests:         []manifest{{manifestPath}},
 		Name:              "policy-app-config",
 		RemediationAction: "inform",
@@ -137,6 +140,7 @@ func TestGetPolicyTemplateInvalidManifest(t *testing.T) {
 	}
 
 	policyConf := policyConfig{
+		ComplianceType:    "musthave",
 		Manifests:         []manifest{{Path: manifestPath}},
 		Name:              "policy-app-config",
 		RemediationAction: "inform",

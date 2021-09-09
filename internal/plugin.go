@@ -25,9 +25,10 @@ type manifest struct {
 }
 
 type policyConfig struct {
-	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
-	Controls   []string `json:"controls,omitempty" yaml:"controls,omitempty"`
-	Disabled   bool     `json:"disabled,omitempty" yaml:"disabled,omitempty"`
+	Categories     []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+	ComplianceType string   `json:"complianceType,omitempty" yaml:"complianceType,omitempty"`
+	Controls       []string `json:"controls,omitempty" yaml:"controls,omitempty"`
+	Disabled       bool     `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	// Make this a slice of structs in the event we want additional configuration related to
 	// a manifest such as accepting patches.
 	Manifests []manifest `json:"manifests,omitempty" yaml:"manifests,omitempty"`
@@ -50,9 +51,10 @@ type Plugin struct {
 		Name string `json:"name,omitempty" yaml:"name,omitempty"`
 	} `json:"placementBindingDefaults,omitempty" yaml:"placementBindingDefaults,omitempty"`
 	PolicyDefaults struct {
-		Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
-		Controls   []string `json:"controls,omitempty" yaml:"controls,omitempty"`
-		Namespace  string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+		Categories     []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+		ComplianceType string   `json:"complianceType,omitempty" yaml:"complianceType,omitempty"`
+		Controls       []string `json:"controls,omitempty" yaml:"controls,omitempty"`
+		Namespace      string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
 		// This is named Placement so that eventually PlacementRules and Placements will be supported
 		Placement struct {
 			ClusterSelectors  map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
@@ -114,13 +116,17 @@ func (p *Plugin) applyDefaults() {
 		return
 	}
 
+	// Set defaults to the defaults that aren't overridden
 	if p.PlacementBindingDefaults.Name == "" && len(p.Policies) == 1 {
 		p.PlacementBindingDefaults.Name = "binding-" + p.Policies[0].Name
 	}
 
-	// Set defaults to the defaults that aren't overridden
 	if p.PolicyDefaults.Categories == nil {
 		p.PolicyDefaults.Categories = []string{"CM Configuration Management"}
+	}
+
+	if p.PolicyDefaults.ComplianceType == "" {
+		p.PolicyDefaults.ComplianceType = "musthave"
 	}
 
 	if p.PolicyDefaults.Controls == nil {
@@ -143,6 +149,10 @@ func (p *Plugin) applyDefaults() {
 		policy := &p.Policies[i]
 		if policy.Categories == nil {
 			policy.Categories = p.PolicyDefaults.Categories
+		}
+
+		if policy.ComplianceType == "" {
+			policy.ComplianceType = p.PolicyDefaults.ComplianceType
 		}
 
 		if policy.Controls == nil {

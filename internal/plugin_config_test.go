@@ -74,6 +74,7 @@ policies:
 	assertEqual(t, p.Metadata.Name, "policy-generator-name")
 	assertEqual(t, p.PlacementBindingDefaults.Name, "my-placement-binding")
 	assertReflectEqual(t, p.PolicyDefaults.Categories, []string{"CM Configuration Management"})
+	assertEqual(t, p.PolicyDefaults.ComplianceType, "musthave")
 	assertReflectEqual(t, p.PolicyDefaults.Controls, []string{"PR.DS-1 Data-at-rest"})
 	assertEqual(t, p.PolicyDefaults.Namespace, "my-policies")
 	assertEqual(t, p.PolicyDefaults.Placement.PlacementRulePath, "")
@@ -89,6 +90,7 @@ policies:
 
 	policy1 := p.Policies[0]
 	assertReflectEqual(t, policy1.Categories, []string{"CM Configuration Management"})
+	assertEqual(t, policy1.ComplianceType, "musthave")
 	assertReflectEqual(t, policy1.Controls, []string{"PR.DS-1 Data-at-rest"})
 	assertEqual(t, policy1.Disabled, false)
 	assertEqual(t, len(policy1.Manifests), 1)
@@ -105,6 +107,7 @@ policies:
 
 	policy2 := p.Policies[1]
 	assertReflectEqual(t, policy2.Categories, []string{"CM Configuration Management"})
+	assertEqual(t, policy2.ComplianceType, "musthave")
 	assertReflectEqual(t, policy2.Controls, []string{"PR.DS-1 Data-at-rest"})
 	assertEqual(t, policy2.Disabled, true)
 	assertEqual(t, len(policy2.Manifests), 1)
@@ -148,6 +151,7 @@ policies:
 	assertEqual(t, p.Metadata.Name, "policy-generator-name")
 	assertEqual(t, p.PlacementBindingDefaults.Name, "binding-policy-app-config")
 	assertReflectEqual(t, p.PolicyDefaults.Categories, []string{"CM Configuration Management"})
+	assertEqual(t, p.PolicyDefaults.ComplianceType, "musthave")
 	assertReflectEqual(t, p.PolicyDefaults.Controls, []string{"CM-2 Baseline Configuration"})
 	assertEqual(t, p.PolicyDefaults.Namespace, "my-policies")
 	assertEqual(t, p.PolicyDefaults.Placement.PlacementRulePath, "")
@@ -159,6 +163,7 @@ policies:
 
 	policy := p.Policies[0]
 	assertReflectEqual(t, policy.Categories, []string{"CM Configuration Management"})
+	assertEqual(t, policy.ComplianceType, "musthave")
 	assertReflectEqual(t, policy.Controls, []string{"CM-2 Baseline Configuration"})
 	assertEqual(t, policy.Disabled, false)
 	assertEqual(t, len(policy.Manifests), 1)
