@@ -25,6 +25,11 @@ type manifest struct {
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 }
 
+type namespaceSelector struct {
+	Exclude []string `json:"exclude,omitempty" yaml:"exclude,omitempty"`
+	Include []string `json:"include,omitempty" yaml:"include,omitempty"`
+}
+
 type policyConfig struct {
 	Categories     []string `json:"categories,omitempty" yaml:"categories,omitempty"`
 	ComplianceType string   `json:"complianceType,omitempty" yaml:"complianceType,omitempty"`
@@ -32,8 +37,9 @@ type policyConfig struct {
 	Disabled       bool     `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	// Make this a slice of structs in the event we want additional configuration related to
 	// a manifest such as accepting patches.
-	Manifests []manifest `json:"manifests,omitempty" yaml:"manifests,omitempty"`
-	Name      string     `json:"name,omitempty" yaml:"name,omitempty"`
+	Manifests         []manifest        `json:"manifests,omitempty" yaml:"manifests,omitempty"`
+	Name              string            `json:"name,omitempty" yaml:"name,omitempty"`
+	NamespaceSelector namespaceSelector `json:"namespaceSelector,omitempty" yaml:"namespaceSelector,omitempty"`
 	// This is named Placement so that eventually PlacementRules and Placements will be supported
 	Placement struct {
 		ClusterSelectors  map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
@@ -52,10 +58,11 @@ type Plugin struct {
 		Name string `json:"name,omitempty" yaml:"name,omitempty"`
 	} `json:"placementBindingDefaults,omitempty" yaml:"placementBindingDefaults,omitempty"`
 	PolicyDefaults struct {
-		Categories     []string `json:"categories,omitempty" yaml:"categories,omitempty"`
-		ComplianceType string   `json:"complianceType,omitempty" yaml:"complianceType,omitempty"`
-		Controls       []string `json:"controls,omitempty" yaml:"controls,omitempty"`
-		Namespace      string   `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+		Categories        []string          `json:"categories,omitempty" yaml:"categories,omitempty"`
+		ComplianceType    string            `json:"complianceType,omitempty" yaml:"complianceType,omitempty"`
+		Controls          []string          `json:"controls,omitempty" yaml:"controls,omitempty"`
+		Namespace         string            `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+		NamespaceSelector namespaceSelector `json:"namespaceSelector,omitempty" yaml:"namespaceSelector,omitempty"`
 		// This is named Placement so that eventually PlacementRules and Placements will be supported
 		Placement struct {
 			ClusterSelectors  map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
@@ -168,6 +175,13 @@ func (p *Plugin) applyDefaults() {
 			} else if len(p.PolicyDefaults.Placement.ClusterSelectors) > 0 {
 				policy.Placement.ClusterSelectors = p.PolicyDefaults.Placement.ClusterSelectors
 			}
+		}
+
+		// Only use defaults when when both include and exclude are not set on the policy
+		nsSelector := policy.NamespaceSelector
+		defNsSelector := p.PolicyDefaults.NamespaceSelector
+		if nsSelector.Exclude == nil && nsSelector.Include == nil {
+			policy.NamespaceSelector = defNsSelector
 		}
 
 		if policy.RemediationAction == "" {

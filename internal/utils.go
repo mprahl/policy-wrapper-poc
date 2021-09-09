@@ -87,11 +87,15 @@ func getPolicyTemplate(policyConf *policyConfig) (
 				"name": policyConf.Name,
 			},
 			"spec": map[string]interface{}{
+				"object-templates":  objectTemplates,
 				"remediationAction": policyConf.RemediationAction,
 				"severity":          policyConf.Severity,
-				"object-templates":  objectTemplates,
 			},
 		},
+	}
+
+	if policyConf.NamespaceSelector.Exclude != nil || policyConf.NamespaceSelector.Include != nil {
+		policyTemplate["objectDefinition"]["spec"].(map[string]interface{})["namespaceSelector"] = policyConf.NamespaceSelector
 	}
 
 	return &policyTemplate, nil

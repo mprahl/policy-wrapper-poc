@@ -42,6 +42,11 @@ policyDefaults:
   controls: 
     - PR.DS-1 Data-at-rest
   namespace: my-policies
+  namespaceSelector:
+    include:
+      - default
+    exclude:
+      - my-protected-ns
   placement:
     clusterSelectors:
       cloud: red hat
@@ -52,6 +57,9 @@ policies:
   disabled: false
   manifests:
     - path: %s
+  namespaceSelector:
+    include:
+      - app-ns
   remediationAction: inform
 - name: policy-app-config2
   disabled: true
@@ -77,6 +85,10 @@ policies:
 	assertEqual(t, p.PolicyDefaults.ComplianceType, "musthave")
 	assertReflectEqual(t, p.PolicyDefaults.Controls, []string{"PR.DS-1 Data-at-rest"})
 	assertEqual(t, p.PolicyDefaults.Namespace, "my-policies")
+	expectedNsSelector := namespaceSelector{
+		Exclude: []string{"my-protected-ns"}, Include: []string{"default"},
+	}
+	assertReflectEqual(t, p.PolicyDefaults.NamespaceSelector, expectedNsSelector)
 	assertEqual(t, p.PolicyDefaults.Placement.PlacementRulePath, "")
 	assertReflectEqual(
 		t,
@@ -96,6 +108,10 @@ policies:
 	assertEqual(t, len(policy1.Manifests), 1)
 	assertEqual(t, policy1.Manifests[0].Path, configMapPath)
 	assertEqual(t, policy1.Name, "policy-app-config")
+	p1ExpectedNsSelector := namespaceSelector{
+		Exclude: nil, Include: []string{"app-ns"},
+	}
+	assertReflectEqual(t, policy1.NamespaceSelector, p1ExpectedNsSelector)
 	assertReflectEqual(
 		t,
 		policy1.Placement.ClusterSelectors,
@@ -113,6 +129,7 @@ policies:
 	assertEqual(t, len(policy2.Manifests), 1)
 	assertEqual(t, policy2.Manifests[0].Path, configMapPath2)
 	assertEqual(t, policy2.Name, "policy-app-config2")
+	assertReflectEqual(t, policy2.NamespaceSelector, expectedNsSelector)
 	assertReflectEqual(
 		t,
 		policy2.Placement.ClusterSelectors,
@@ -154,6 +171,8 @@ policies:
 	assertEqual(t, p.PolicyDefaults.ComplianceType, "musthave")
 	assertReflectEqual(t, p.PolicyDefaults.Controls, []string{"CM-2 Baseline Configuration"})
 	assertEqual(t, p.PolicyDefaults.Namespace, "my-policies")
+	expectedNsSelector := namespaceSelector{Exclude: nil, Include: nil}
+	assertReflectEqual(t, p.PolicyDefaults.NamespaceSelector, expectedNsSelector)
 	assertEqual(t, p.PolicyDefaults.Placement.PlacementRulePath, "")
 	assertEqual(t, len(p.PolicyDefaults.Placement.ClusterSelectors), 0)
 	assertEqual(t, p.PolicyDefaults.RemediationAction, "inform")
@@ -169,6 +188,7 @@ policies:
 	assertEqual(t, len(policy.Manifests), 1)
 	assertEqual(t, policy.Manifests[0].Path, configMapPath)
 	assertEqual(t, policy.Name, "policy-app-config")
+	assertReflectEqual(t, policy.NamespaceSelector, expectedNsSelector)
 	assertEqual(t, len(policy.Placement.ClusterSelectors), 0)
 	assertEqual(t, policy.Placement.PlacementRulePath, "")
 	assertEqual(t, policy.RemediationAction, "inform")

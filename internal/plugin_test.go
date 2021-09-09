@@ -159,8 +159,9 @@ func TestCreatePolicyDir(t *testing.T) {
 	p := Plugin{}
 	p.PolicyDefaults.Namespace = "my-policies"
 	policyConf := policyConfig{
-		Name:      "policy-app-config",
-		Manifests: []manifest{{Path: tmpDir}},
+		Name:              "policy-app-config",
+		Manifests:         []manifest{{Path: tmpDir}},
+		NamespaceSelector: namespaceSelector{Include: []string{"default"}},
 	}
 	p.Policies = append(p.Policies, policyConf)
 	p.applyDefaults()
@@ -191,6 +192,9 @@ spec:
             metadata:
                 name: policy-app-config
             spec:
+                namespaceSelector:
+                    include:
+                        - default
                 object-templates:
                     - complianceType: musthave
                       objectDefinition:
