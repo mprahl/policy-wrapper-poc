@@ -249,7 +249,7 @@ func TestCreatePlacementRuleDefault(t *testing.T) {
 	p.PolicyDefaults.Namespace = "my-policies"
 	policyConf := policyConfig{Name: "policy-app-config"}
 
-	name, err := p.createPlacementRule(&policyConf)
+	name, err := p.createPlacementRule(&policyConf, map[string]bool{})
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -283,7 +283,7 @@ func TestCreatePlacementRuleClusterSelectors(t *testing.T) {
 		"game":  "pacman",
 	}
 
-	name, err := p.createPlacementRule(&policyConf)
+	name, err := p.createPlacementRule(&policyConf, map[string]bool{})
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -356,7 +356,7 @@ spec:
 	plrYAML = strings.TrimPrefix(plrYAML, "\n")
 	p, _ := plrPathHelper(t, plrYAML)
 
-	name, err := p.createPlacementRule(&p.Policies[0])
+	name, err := p.createPlacementRule(&p.Policies[0], map[string]bool{})
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -364,6 +364,27 @@ spec:
 	assertEqual(t, name, "my-plr")
 	output := p.outputBuffer.String()
 	assertEqual(t, output, plrYAML)
+}
+
+func TestCreatePlacementRulePlrPathSkip(t *testing.T) {
+	plrYAML := `
+---
+apiVersion: apps.open-cluster-management.io/v1
+kind: PlacementRule
+metadata:
+    name: my-plr
+    namespace: my-policies
+`
+	plrYAML = strings.TrimPrefix(plrYAML, "\n")
+	p, _ := plrPathHelper(t, plrYAML)
+
+	name, err := p.createPlacementRule(&p.Policies[0], map[string]bool{"my-plr": true})
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	assertEqual(t, name, "my-plr")
+	assertEqual(t, p.outputBuffer.String(), "")
 }
 
 func TestCreatePlacementRulePlrPathNoName(t *testing.T) {
@@ -382,7 +403,7 @@ spec:
 `
 	p, plrPath := plrPathHelper(t, plrYAML)
 
-	_, err := p.createPlacementRule(&p.Policies[0])
+	_, err := p.createPlacementRule(&p.Policies[0], map[string]bool{})
 	if err == nil {
 		t.Fatal("Expected an error but did not get one")
 	}
@@ -407,7 +428,7 @@ spec:
 `
 	p, plrPath := plrPathHelper(t, plrYAML)
 
-	_, err := p.createPlacementRule(&p.Policies[0])
+	_, err := p.createPlacementRule(&p.Policies[0], map[string]bool{})
 	if err == nil {
 		t.Fatal("Expected an error but did not get one")
 	}
@@ -433,7 +454,7 @@ spec:
 `
 	p, plrPath := plrPathHelper(t, plrYAML)
 
-	_, err := p.createPlacementRule(&p.Policies[0])
+	_, err := p.createPlacementRule(&p.Policies[0], map[string]bool{})
 	if err == nil {
 		t.Fatal("Expected an error but did not get one")
 	}
@@ -459,7 +480,7 @@ data:
 `
 	p, plrPath := plrPathHelper(t, plrYAML)
 
-	_, err := p.createPlacementRule(&p.Policies[0])
+	_, err := p.createPlacementRule(&p.Policies[0], map[string]bool{})
 	if err == nil {
 		t.Fatal("Expected an error but did not get one")
 	}

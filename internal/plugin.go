@@ -93,12 +93,14 @@ func (p *Plugin) Generate() ([]byte, error) {
 		}
 	}
 	plrNameToPolicyIdxs := map[string][]int{}
+	seen := map[string]bool{}
 	for i := range p.Policies {
-		plrName, err := p.createPlacementRule(&p.Policies[i])
+		plrName, err := p.createPlacementRule(&p.Policies[i], seen)
 		if err != nil {
 			return nil, err
 		}
 		plrNameToPolicyIdxs[plrName] = append(plrNameToPolicyIdxs[plrName], i)
+		seen[plrName] = true
 	}
 	plcBindingCount := 0
 	for plrName, policyIdxs := range plrNameToPolicyIdxs {
@@ -296,7 +298,9 @@ func (p *Plugin) createPolicy(policyConf *policyConfig) error {
 	return nil
 }
 
-func (p *Plugin) createPlacementRule(policyConf *policyConfig) (name string, err error) {
+func (p *Plugin) createPlacementRule(policyConf *policyConfig, skip map[string]bool) (
+	name string, err error,
+) {
 	plrPath := policyConf.Placement.PlacementRulePath
 	var rule map[string]interface{}
 	if plrPath != "" {
@@ -336,6 +340,10 @@ func (p *Plugin) createPlacementRule(policyConf *policyConfig) (name string, err
 
 			rule = manifest
 			break
+		}
+
+		if skip[name] {
+			return name, nil
 		}
 
 		if name == "" {
