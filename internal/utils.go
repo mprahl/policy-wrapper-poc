@@ -1,3 +1,4 @@
+// Copyright Contributors to the Open Cluster Management project
 package internal
 
 import (
@@ -12,13 +13,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// getPolicyTemplate generates a policy template for a ConfigurationPolicy
+// that includes the manifests specified in policyConf. An error is returned
+// if one or more manifests cannot be read or are invalid.
 func getPolicyTemplate(policyConf *policyConfig) (
 	*map[string]map[string]interface{}, error,
 ) {
-	manifests := []interface{}{}
+	manifests := []map[string]interface{}{}
 	for _, manifest := range policyConf.Manifests {
 		manifestPaths := []string{}
-		readErr := fmt.Errorf("failed to read the manifest directory %s", manifest.Path)
+		readErr := fmt.Errorf("failed to read the manifest path %s", manifest.Path)
 		manifestPathInfo, err := os.Stat(manifest.Path)
 		if err != nil {
 			return nil, readErr
@@ -67,15 +71,25 @@ func getPolicyTemplate(policyConf *policyConfig) (
 		)
 	}
 
+	objectTemplates := make([]map[string]interface{}, 0, len(manifests))
+	for _, manifest := range manifests {
+		objTemplate := map[string]interface{}{
+			"complianceType":   "musthave",
+			"objectDefinition": manifest,
+		}
+		objectTemplates = append(objectTemplates, objTemplate)
+	}
 	policyTemplate := map[string]map[string]interface{}{
 		"objectDefinition": {
 			"apiVersion": policyAPIVersion,
 			"kind":       configPolicyKind,
-			"name":       policyConf.Name,
+			"metadata": map[string]string{
+				"name": policyConf.Name,
+			},
 			"spec": map[string]interface{}{
 				"remediationAction": policyConf.RemediationAction,
 				"severity":          policyConf.Severity,
-				"object-templates":  manifests,
+				"object-templates":  objectTemplates,
 			},
 		},
 	}
@@ -87,13 +101,13 @@ func getPolicyTemplate(policyConf *policyConfig) (
 // a slice in order to account for multiple YAML documents in the same file.
 // If the file cannot be decoded or each document is not a map, an error will
 // be returned.
-func unmarshalManifestFile(manifestPath string) (*[]interface{}, error) {
+func unmarshalManifestFile(manifestPath string) (*[]map[string]interface{}, error) {
 	manifestBytes, err := ioutil.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the manifest file %s", manifestPath)
 	}
 
-	yamlDocs := []interface{}{}
+	yamlDocs := []map[string]interface{}{}
 	d := yaml.NewDecoder(bytes.NewReader(manifestBytes))
 	for {
 		var obj interface{}
@@ -111,7 +125,7 @@ func unmarshalManifestFile(manifestPath string) (*[]interface{}, error) {
 			return nil, err
 		}
 
-		yamlDocs = append(yamlDocs, obj)
+		yamlDocs = append(yamlDocs, obj.(map[string]interface{}))
 	}
 
 	return &yamlDocs, nil

@@ -1,3 +1,4 @@
+// Copyright Contributors to the Open Cluster Management project
 package internal
 
 import (
@@ -19,16 +20,18 @@ const placementRuleKind = "PlacementRule"
 const placementBindingAPIVersion = "policy.open-cluster-management.io/v1"
 const placementBindingKind = "PlacementBinding"
 
+type manifest struct {
+	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+}
+
 type policyConfig struct {
 	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
 	Controls   []string `json:"controls,omitempty" yaml:"controls,omitempty"`
 	Disabled   bool     `json:"disabled,omitempty" yaml:"disabled,omitempty"`
 	// Make this a slice of structs in the event we want additional configuration related to
 	// a manifest such as accepting patches.
-	Manifests []struct {
-		Path string `json:"path,omitempty" yaml:"path,omitempty"`
-	} `json:"manifests,omitempty" yaml:"manifests,omitempty"`
-	Name string `json:"name,omitempty" yaml:"name,omitempty"`
+	Manifests []manifest `json:"manifests,omitempty" yaml:"manifests,omitempty"`
+	Name      string     `json:"name,omitempty" yaml:"name,omitempty"`
 	// This is named Placement so that eventually PlacementRules and Placements will be supported
 	Placement struct {
 		ClusterSelectors  map[string]string `json:"clusterSelectors,omitempty" yaml:"clusterSelectors,omitempty"`
@@ -81,7 +84,7 @@ func (p *Plugin) Generate() ([]byte, error) {
 	}
 	plrNameToPolicyIdxs := map[string][]int{}
 	for i := range p.Policies {
-		plrName, err := p.getOrCreatePlacementRule(&p.Policies[i])
+		plrName, err := p.createPlacementRule(&p.Policies[i])
 		if err != nil {
 			return nil, err
 		}
@@ -137,32 +140,35 @@ func (p *Plugin) applyDefaults() {
 	}
 
 	for i := range p.Policies {
-		if p.Policies[i].Categories == nil {
-			p.Policies[i].Categories = p.PolicyDefaults.Categories
+		policy := &p.Policies[i]
+		if policy.Categories == nil {
+			policy.Categories = p.PolicyDefaults.Categories
 		}
 
-		if p.Policies[i].Controls == nil {
-			p.Policies[i].Controls = p.PolicyDefaults.Controls
+		if policy.Controls == nil {
+			policy.Controls = p.PolicyDefaults.Controls
 		}
 
-		if p.Policies[i].Placement.ClusterSelectors == nil {
-			p.Policies[i].Placement.ClusterSelectors = p.PolicyDefaults.Placement.ClusterSelectors
+		// If both cluster selectors and placement rule path aren't set, then use the
+		// defaults with a priority on placement rule path.
+		if len(policy.Placement.ClusterSelectors) == 0 && policy.Placement.PlacementRulePath == "" {
+			if p.PolicyDefaults.Placement.PlacementRulePath != "" {
+				policy.Placement.PlacementRulePath = p.PolicyDefaults.Placement.PlacementRulePath
+			} else if len(p.PolicyDefaults.Placement.ClusterSelectors) > 0 {
+				policy.Placement.ClusterSelectors = p.PolicyDefaults.Placement.ClusterSelectors
+			}
 		}
 
-		if p.Policies[i].Placement.PlacementRulePath == "" {
-			p.Policies[i].Placement.PlacementRulePath = p.PolicyDefaults.Placement.PlacementRulePath
+		if policy.RemediationAction == "" {
+			policy.RemediationAction = p.PolicyDefaults.RemediationAction
 		}
 
-		if p.Policies[i].RemediationAction == "" {
-			p.Policies[i].RemediationAction = p.PolicyDefaults.RemediationAction
+		if policy.Severity == "" {
+			policy.Severity = p.PolicyDefaults.Severity
 		}
 
-		if p.Policies[i].Severity == "" {
-			p.Policies[i].Severity = p.PolicyDefaults.Severity
-		}
-
-		if p.Policies[i].Standards == nil {
-			p.Policies[i].Standards = p.PolicyDefaults.Standards
+		if policy.Standards == nil {
+			policy.Standards = p.PolicyDefaults.Standards
 		}
 	}
 
@@ -171,7 +177,7 @@ func (p *Plugin) applyDefaults() {
 // assertValidConfig verifies that the user provided configuration has all the
 // required fields. Note that this should be run only after applyDefaults is run.
 func (p *Plugin) assertValidConfig() error {
-	if p.PlacementBindingDefaults.Name == "" {
+	if p.PlacementBindingDefaults.Name == "" && len(p.Policies) > 1 {
 		return errors.New(
 			"placementBindingDefaults.name must be set when there are mutiple policies",
 		)
@@ -186,11 +192,19 @@ func (p *Plugin) assertValidConfig() error {
 	}
 
 	for i := range p.Policies {
-		if len(p.Policies[i].Manifests) == 0 {
+		policy := &p.Policies[i]
+		if len(policy.Placement.ClusterSelectors) != 0 && policy.Placement.PlacementRulePath != "" {
+			return errors.New(
+				"a policy may not specify placement.clusterSelectors and " +
+					"placement.placementRulePath together",
+			)
+		}
+
+		if len(policy.Manifests) == 0 {
 			return errors.New("each policy must have at least one manifest")
 		}
 
-		for _, manifest := range p.Policies[i].Manifests {
+		for _, manifest := range policy.Manifests {
 			if manifest.Path == "" {
 				return errors.New("each policy manifest entry must have path set")
 			}
@@ -201,8 +215,18 @@ func (p *Plugin) assertValidConfig() error {
 			}
 		}
 
-		if p.Policies[i].Name == "" {
+		if policy.Name == "" {
 			return errors.New("each policy must have a name set")
+		}
+
+		if policy.Placement.PlacementRulePath != "" {
+			_, err := os.Stat(policy.Placement.PlacementRulePath)
+			if err != nil {
+				return fmt.Errorf(
+					"could not read the placement rule path %s",
+					policy.Placement.PlacementRulePath,
+				)
+			}
 		}
 	}
 
@@ -247,30 +271,30 @@ func (p *Plugin) createPolicy(policyConf *policyConfig) error {
 	return nil
 }
 
-func (p *Plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string, err error) {
+func (p *Plugin) createPlacementRule(policyConf *policyConfig) (name string, err error) {
 	plrPath := policyConf.Placement.PlacementRulePath
+	var rule map[string]interface{}
 	if plrPath != "" {
-		var manifests *[]interface{}
+		var manifests *[]map[string]interface{}
 		manifests, err = unmarshalManifestFile(plrPath)
 		if err != nil {
 			return
 		}
 
 		for _, manifest := range *manifests {
-			var object = manifest.(map[string]interface{})
-			if kind, _, _ := unstructured.NestedString(object, "kind"); kind != placementRuleKind {
+			if kind, _, _ := unstructured.NestedString(manifest, "kind"); kind != placementRuleKind {
 				continue
 			}
 
 			var found bool
-			name, found, err = unstructured.NestedString(object, "metadata", "name")
+			name, found, err = unstructured.NestedString(manifest, "metadata", "name")
 			if !found || err != nil {
 				err = fmt.Errorf("the placement %s must have a name set", plrPath)
 				return
 			}
 
 			var namespace string
-			namespace, found, err = unstructured.NestedString(object, "metadata", "namespace")
+			namespace, found, err = unstructured.NestedString(manifest, "metadata", "namespace")
 			if !found || err != nil {
 				err = fmt.Errorf("the placement %s must have a namespace set", plrPath)
 				return
@@ -285,6 +309,7 @@ func (p *Plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string
 				return
 			}
 
+			rule = manifest
 			break
 		}
 
@@ -295,36 +320,34 @@ func (p *Plugin) getOrCreatePlacementRule(policyConf *policyConfig) (name string
 
 			return
 		}
-
-		return
-	}
-
-	matchExpressions := []map[string]interface{}{}
-	for label, value := range policyConf.Placement.ClusterSelectors {
-		matchExpression := map[string]interface{}{
-			"key":      label,
-			"operator": "In",
-			"values":   []string{value},
+	} else {
+		matchExpressions := []map[string]interface{}{}
+		for label, value := range policyConf.Placement.ClusterSelectors {
+			matchExpression := map[string]interface{}{
+				"key":      label,
+				"operator": "In",
+				"values":   []string{value},
+			}
+			matchExpressions = append(matchExpressions, matchExpression)
 		}
-		matchExpressions = append(matchExpressions, matchExpression)
-	}
 
-	name = "placement-" + policyConf.Name
-	rule := map[string]interface{}{
-		"apiVersion": placementRuleAPIVersion,
-		"kind":       placementRuleKind,
-		"metadata": map[string]interface{}{
-			"name":      name,
-			"namespace": p.PolicyDefaults.Namespace,
-		},
-		"spec": map[string]interface{}{
-			"clusterConditions": []map[string]string{
-				{"status": "True", "type": "ManagedClusterConditionAvailable"},
+		name = "placement-" + policyConf.Name
+		rule = map[string]interface{}{
+			"apiVersion": placementRuleAPIVersion,
+			"kind":       placementRuleKind,
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": p.PolicyDefaults.Namespace,
 			},
-			"clusterSelector": map[string]interface{}{
-				"matchExpressions": matchExpressions,
+			"spec": map[string]interface{}{
+				"clusterConditions": []map[string]string{
+					{"status": "True", "type": "ManagedClusterConditionAvailable"},
+				},
+				"clusterSelector": map[string]interface{}{
+					"matchExpressions": matchExpressions,
+				},
 			},
-		},
+		}
 	}
 
 	var ruleYAML []byte
