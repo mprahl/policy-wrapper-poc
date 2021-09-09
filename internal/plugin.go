@@ -218,6 +218,7 @@ func (p *Plugin) assertValidConfig() error {
 		return errors.New("policies is empty but it must be set")
 	}
 
+	seen := map[string]bool{}
 	for i := range p.Policies {
 		policy := &p.Policies[i]
 		if len(policy.Placement.ClusterSelectors) != 0 && policy.Placement.PlacementRulePath != "" {
@@ -246,6 +247,10 @@ func (p *Plugin) assertValidConfig() error {
 			return errors.New("each policy must have a name set")
 		}
 
+		if seen[policy.Name] {
+			return fmt.Errorf("each policy must have a unique name set: %s", policy.Name)
+		}
+
 		if policy.Placement.PlacementRulePath != "" {
 			_, err := os.Stat(policy.Placement.PlacementRulePath)
 			if err != nil {
@@ -255,6 +260,8 @@ func (p *Plugin) assertValidConfig() error {
 				)
 			}
 		}
+
+		seen[policy.Name] = true
 	}
 
 	return nil

@@ -290,6 +290,39 @@ policies:
 	assertEqual(t, err.Error(), expected)
 }
 
+func TestConfigDuplicateNames(t *testing.T) {
+	tmpDir := t.TempDir()
+	createConfigMap(t, tmpDir, "configmap.yaml")
+	createConfigMap(t, tmpDir, "configmap2.yaml")
+	config := fmt.Sprintf(`
+apiVersion: policy.open-cluster-management.io/v1
+kind: PolicyGenerator
+metadata:
+  name: policy-generator-name
+placementBindingDefaults:
+  name: my-pb
+policyDefaults:
+  namespace: my-policies
+policies:
+- name: policy-app-config
+  manifests:
+    - path: %s
+- name: policy-app-config
+  manifests:
+    - path: %s
+`,
+		path.Join(tmpDir, "configmap.yaml"),
+		path.Join(tmpDir, "configmap2.yaml"),
+	)
+	p := Plugin{}
+	err := p.Config([]byte(config))
+	if err == nil {
+		t.Fatal("Expected an error but did not get one")
+	}
+
+	assertEqual(t, err.Error(), "each policy must have a unique name set: policy-app-config")
+}
+
 func TestConfigNoManifests(t *testing.T) {
 	const config = `
 apiVersion: policy.open-cluster-management.io/v1
