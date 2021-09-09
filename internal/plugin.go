@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -331,12 +332,19 @@ func (p *Plugin) createPlacementRule(policyConf *policyConfig) (name string, err
 			return
 		}
 	} else {
+		// Sort the keys so that the match expressions can be ordered based on the label name
+		keys := make([]string, 0, len(policyConf.Placement.ClusterSelectors))
+		for key := range policyConf.Placement.ClusterSelectors {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+
 		matchExpressions := []map[string]interface{}{}
-		for label, value := range policyConf.Placement.ClusterSelectors {
+		for _, label := range keys {
 			matchExpression := map[string]interface{}{
 				"key":      label,
 				"operator": "In",
-				"values":   []string{value},
+				"values":   []string{policyConf.Placement.ClusterSelectors[label]},
 			}
 			matchExpressions = append(matchExpressions, matchExpression)
 		}
