@@ -419,7 +419,7 @@ func (p *Plugin) createPlacementBinding(
 	subjects := make([]map[string]string, 0, len(policyConfs))
 	for _, policyConf := range policyConfs {
 		subject := map[string]string{
-			"apiGroup": policyAPIVersion,
+			"apiGroup": strings.Split(policyAPIVersion, "/")[0],
 			"kind":     policyKind,
 			"name":     policyConf.Name,
 		}
@@ -434,7 +434,7 @@ func (p *Plugin) createPlacementBinding(
 			"namespace": p.PolicyDefaults.Namespace,
 		},
 		"placementRef": map[string]string{
-			"apiGroup": placementRuleAPIVersion,
+			"apiGroup": strings.Split(placementRuleAPIVersion, "/")[0],
 			"name":     plrName,
 			"kind":     placementRuleKind,
 		},

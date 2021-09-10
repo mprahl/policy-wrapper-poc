@@ -40,14 +40,14 @@ metadata:
   name: my-placement-binding
   namespace: my-policies
 placementRef:
-  apiGroup: apps.open-cluster-management.io/v1
+  apiGroup: apps.open-cluster-management.io
   kind: PlacementRule
   name: placement-red-hat-cloud
 subjects:
-- apiGroup: policy.open-cluster-management.io/v1
+- apiGroup: policy.open-cluster-management.io
   kind: Policy
   name: policy-app-config
-- apiGroup: policy.open-cluster-management.io/v1
+- apiGroup: policy.open-cluster-management.io
   kind: Policy
   name: policy-app-config2
 ---
