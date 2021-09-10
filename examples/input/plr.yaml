@@ -14,4 +14,4 @@ spec:
       - key: cloud
         operator: In
         values:
-          - red hat
+          - Amazon
